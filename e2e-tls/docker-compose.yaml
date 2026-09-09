@@ -1,0 +1,45 @@
+name: mq-e2e-tls
+
+services:
+  qm1:
+    image: icr.io/ibm-messaging/mq:latest
+    container_name: mq-e2e-qm1
+    hostname: qm1
+    environment:
+      LICENSE: accept
+      MQ_QMGR_NAME: QM1
+      # Keep the developer defaults (DEV.* objects, CHLAUTH back-stop rule).
+      MQ_DEV: "true"
+      MQ_ENABLE_EMBEDDED_WEB_SERVER: "false"
+    ports:
+      - "1414:1414"
+    volumes:
+      - ./pki/qm/keys:/etc/mqm/pki/keys:ro
+      - ./pki/qm/trust:/etc/mqm/pki/trust:ro
+      - ./mqsc/30-monitor.mqsc:/etc/mqm/30-monitor.mqsc:ro
+    healthcheck:
+      test: ["CMD", "chkmqhealthy"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  exporter:
+    image: ${EXPORTER_IMAGE:-ghcr.io/anael-l/mq-metric-samples:master}
+    container_name: mq-e2e-exporter
+    depends_on:
+      qm1:
+        condition: service_healthy
+    # Run as an unprivileged, non-existent uid, as OpenShift would. The image
+    # already makes /IBM and /.mqm world-writable for this reason.
+    user: "1001:0"
+    environment:
+      # MQSSLKEYR takes the path without the .kdb suffix
+      MQSSLKEYR: /opt/config/ssl/key
+      IBMMQ_GLOBAL_LOGLEVEL: ${LOGLEVEL:-INFO}
+    ports:
+      - "9157:9157"
+    volumes:
+      - ./config/mq_prometheus.yaml:/opt/config/mq_prometheus.yaml:ro
+      - ./config/ccdt.json:/opt/config/ccdt.json:ro
+      - ./pki/client:/opt/config/ssl:ro
