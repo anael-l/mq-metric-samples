@@ -2,9 +2,10 @@
 name: Create and publish Docker images
 
 # Builds one image per collector from the root Dockerfile (which selects the
-# collector via the EXPORTER build-arg) and pushes them to GHCR:
-#   ghcr.io/<owner>/mq-metric-samples:<branch>        -> mq_prometheus
-#   ghcr.io/<owner>/mq-metric-samples:<branch>-otel   -> mq_otel
+# collector via the EXPORTER build-arg) and pushes each to its own GHCR package,
+# named like the images scripts/buildRuntime.sh produces:
+#   ghcr.io/<owner>/mq-metric-prometheus:<branch>   -> mq_prometheus
+#   ghcr.io/<owner>/mq-metric-otel:<branch>         -> mq_otel
 on:
   push:
     branches: ['master']
@@ -12,7 +13,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push-image:
@@ -22,9 +22,9 @@ jobs:
       matrix:
         include:
           - exporter: mq_prometheus
-            suffix: ""
+            image: mq-metric-prometheus
           - exporter: mq_otel
-            suffix: "-otel"
+            image: mq-metric-otel
     # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
     permissions:
       contents: read
@@ -42,14 +42,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Same image name for every collector; the matrix suffix distinguishes the tags.
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          flavor: |
-            suffix=${{ matrix.suffix }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
           labels: |
             org.opencontainers.image.title=${{ matrix.exporter }}
 
@@ -67,6 +64,6 @@ jobs:
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v2
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
