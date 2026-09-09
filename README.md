@@ -1,15 +1,18 @@
 # mq-metric-samples
 
-This repository contains a collection of IBM MQ monitoring agents that utilize the
-[IBM MQ Go metric packages](https://github.com/ibm-messaging/mq-golang) to provide programs that can be used with
-existing monitoring technologies such as Prometheus, AWS CloudWatch, etc. It can also send data to an OpenTelemetry
-environment. Statistics and status information can be
-collected from queue managers and made available in databases to enable dashboard and historic reporting.
+This repository contains a collection of IBM MQ monitoring agents that utilize the [IBM MQ Go metric
+packages](https://github.com/ibm-messaging/mq-golang) to provide programs that can be used with existing monitoring
+technologies such as Prometheus and OpenTelemetry environments. Statistics and status information can be collected from
+queue managers and made available in databases to enable dashboard and historic reporting.
 
 ## The dspmqrtj program
 The repository also includes a program which traces the route a message can take through the MQ network. It is similar
 to the `dspmqrte` program that is part of the MQ product, but writes the output in JSON format. See the `dspmqrtj`
 subdirectory for more information.
+
+## The amqsevtg program
+The repository also includes a program that formats queue manager event messages, and can write the output
+direct to OTel backends. See the `amqsevtg` subdirectory for more information.
 
 ## Health Warning
 
@@ -17,10 +20,14 @@ This package is provided as-is with no guarantees of support or updates. There a
 with any future versions of the package; interfaces and functions are subject to change based on any feedback. You
 cannot use IBM formal support channels (Cases/PMRs) for assistance with material in this repository.
 
+This does not affect the status of the underlying MQ C client libraries which have their own support conditions.
+
 These programs use a specific version of the `mqmetric` and `ibmmq` golang packages. Those packages are in the
 [mq-golang repository](https://github.com/ibm-messaging/mq-golang) and are also included in the `vendor` tree of this
 repository. They are referenced in the `go.mod` file if you wish to reload all of the dependencies by running
 `go mod vendor`.
+
+See the [DEPRECATIONS](DEPRECATIONS.md) file for any planned changes to the metric collectors.
 
 ## Getting started
 
@@ -28,7 +35,8 @@ repository. They are referenced in the `go.mod` file if you wish to reload all o
 
 You will require the following programs:
 
-* Go compiler - version 1.21 is the minimum defined here
+* Go compiler - version 1.25 is the minimum defined here; newer versions are automatically installed during the build
+  process if required.
 * C compiler
 
 ### MQ Client SDK
@@ -87,8 +95,9 @@ You still need to provide the configuration file at runtime, perhaps as a mounte
 ### Platform support
 This Dockerfile should work for a variety of platforms. For those with a Redistributable client, it uses `curl` to
 automatically download and unpack the required MQ files. For other platforms, it assumes that you have an `MQINST`
-subdirectory under this root, and then copied the `.deb` files (or the `.tar.gz` file for Linux/arm64 systems) from your
-real MQ installation tree into it.
+subdirectory under this root, and then copied the `.rpm` or `deb` files (or the `.tar.gz` file for Linux/arm64 systems)
+from your real MQ installation tree into it. The base OS image in the Dockerfile is rpm-based, but you might want to
+change it to your preferred base container image.
 
 ### Additional container scripts
 
@@ -100,11 +109,10 @@ collector program alongside a queue manager (perhaps as an MQ SERVICE) and you n
 system.
 
 ## Building to run on Windows
-There is a `buildMonitors.bat` file to help with building on Windows. It assumes 
-* You have the
-[msys2](https://www.msys2.org/) 64-bit GCC compiler suite installed into the `C:\msys64` directory. The specific
-compiler version from this package can be installed with `pacman -S mingw-w64-ucrt-x86_64-gcc`. That should end up with
-the `gcc` command being available.
+There is a `buildMonitors.bat` file to help with building on Windows. It assumes
+* You have the [msys2](https://www.msys2.org/) 64-bit GCC compiler suite installed into the `C:\msys64` directory. The
+  specific compiler version from this package can be installed with `pacman -S mingw-w64-ucrt-x86_64-gcc`. That should
+  end up with the `gcc` command being available.
 * You have set the GOPATH environment variable to the root of your source trees. For example, `C:\Gowork`.
 
 The script builds all the collectors and corresponding YAML configuration files into %GOPATH%/bin. An alternative
@@ -150,7 +158,8 @@ collector is not running, so that may induce queue-full reports in the error log
 manually removed using the `DELETE SUB()` MQSC command for all subscriptions where the subscription ids begin with the
 `durableSubPrefix` value. The `scripts/cleanDur.sh` program can be used for this deletion. You should also clean the
 subscriptions when the configuration of which data to collect has changed, particularly the `queueSubscriptionSelector`
-option.
+option. Any publications generated while the the collector is not running are, in any case, discarded on startup of
+the collector.
 
 ## Monitor configuration
 The monitors always collect all of the available queue manager-wide metrics. They can also be configured to collect
@@ -172,6 +181,47 @@ bottom of the _discover.go_ module in the _mqmetric_ package.
 The queue patterns are expanded at startup of the program and at regular intervals thereafter. So newly-defined queues
 will eventually be monitored if they match the pattern. The rediscovery interval is 1h by default, but can be modified
 by the `rediscoverInterval` parameter.
+
+### Queue Manager Statistics Events
+An alternative to the published resource statistics for queue and many queue manager metrics is to use the
+Statistics Events messages.
+
+These events are available on the Distributed platforms by setting the queue manager `STATMQI` attribute to `ON` and
+also enabling the `STATQ` attribute for the queue manager and/or individual queues. You should also set the `STATINT`
+value to something appropriate for your collection interval. The default value of 1800 (30 minutes) is probably much too
+large. The `STATCHL` option is ignored; any Event messages reporting on channel activity are ignored as the channel
+status responses already give similar metrics.
+
+Set the `global.useStatistics` value to `true` in the collector's configuration to use this option. The default value is
+`false`. You can also use the `connection.StatisticsQueue` option to name the queue holding these events if it is not
+the standard `SYSTEM.ADMIN.STATISTICS.QUEUE`. You should still have `global.usePublications` set to `true` if you want
+to collect other metrics - for example, the queue manager logger details, or NativeHA metrics that are only available
+through the publication route. So there will still be some subscriptions, but to a much smaller number of topics.
+
+When you use these events, the `monitoredQueues` value is overridden and automatically set to `*`. All queues that have
+the `STATQ` enabled, either explicitly or through inheritance from the queue manager setting, are reported on. We
+continue to use some published metrics, primarily at the queue manager level, but there are no longer queue-specific
+subscriptions. Instead the values are taken from the Event messages.
+
+The metrics created through this mechanism may have different names than similar metrics that are returned from the
+publications. The Events may not report on every queue at every interval; it may only be queues that have had some
+activity during the interval. Regardless of the metric names, the actual set of metrics is not identical across the two
+approaches - generally, the published metrics can go into more detail on queue activity than the corresponding STATQ
+events. However some metrics can be found only in one of the sets, and some only in the other.
+
+If you look at the PCF definition of these event messages, you will see that many of them return arrays of metrics. For
+example there are separate values returned in the same element for the persistent and non-persistent MQPUT message
+counts. The collection process here simplifies the aggregation of these elements by creating and reporting an extra
+value of the total across the array. This should simplify dashboards so you do not need to query for multiple metrics,
+only to add them up yourself. But the individual numbers are still available too.
+
+Look at the metrics.txt file to see all of the metrics available through this mechanism.
+
+If you are using the Prometheus collector, the `overrideCType` value is always automatically set to `true` (regardless
+of any configuration value) to give the correct distinction between Counters and Gauges. See the Prometheus directory's
+README for more information on that attribute.
+
+The seemingly-similar Accounting Events are **not** handled in these collectors.
 
 ### Channel Status
 The monitor programs can process channel status, reporting that back into the database.
@@ -228,8 +278,8 @@ configuration attribute to true.
 When NativeHA is used, the queue manager publishes some metrics on its status. These are automatically collected
 whenever available, and can be seen in the metric lists. The metrics are given a prefix or series of "nha". For example,
 `ibmmq_nha_synchronous_log_sent_bytes` is one metric shown in Prometheus. The NativeHA "instance" or "group"
-name - given to the replicas - is added as the `nha` tag to the metrics. Each NativeHA metric 
-is associated with either an instance or group, never both. 
+name - given to the replicas - is added as the `nha` tag to the metrics. Each NativeHA metric
+is associated with either an instance or group, never both.
 
 Note: The `nha` tag was previously called `nhainstance` but
 that was confusing when the cross-region replication feature was introduced. Existing dashboards might need updating

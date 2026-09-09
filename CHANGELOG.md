@@ -1,21 +1,71 @@
 # Changelog
 Newest updates are at the top of this file.
 
+
+## Jun 16 2026 - v6.0.0
+* Pull in latest mq-golang package
+* Individual metrics can be included/excluded from reporting
+* Removal of aws, collectd, influx, opentsdb collectors
+* Prometheus collector `overrideCType` default changed to `true`
+  * To correctly distinguish between Counter and Gauge types
+* Major version change because of removals and default changes
+
+## Feb 06 2026 - v5.7.1
+* Update to MQ 9.4.5
+* Pull in latest mq-golang package
+
+## Dec 14 2025 - v5.7.0
+* Pull in latest mq-golang package
+  * Includes fixes for #444 and (probably) #439
+* Enable use of STATQ/STATMQI event messages as alternative to many of the published metrics
+  * OTel, JSON and Prometheus collectors only
+  * Look at the README for more details
+* Break cleanly out of collectors after configurable loop count for testing purposes
+  * OTel, Prometheus and JSON collectors
+* OTel collector gets a `stderr` output option to go with its `stdout`
+
+## Nov 12 2025 - v5.6.7
+* Pull in latest mq-golang package
+* Add DEPRECATIONS file
+
+### Nov 03 2025 (v5.6.6)
+* Pull in fix for #440
+
+### Oct 16 2025 (v5.6.5)
+* Update to MQ 9.4.4
+* Add showCustomAttribute filter config setting to include the CUSTOM attribute as metric tag/label
+
+### Jun 19 2025 (no new version)
+* Improve container building
+
+### Jun 18 2025 (v5.6.4)
+* Update to MQ 9.4.3
+* Add MQTT channel metrics, similar to AMQP
+* Changes from underlying mq-golang mqmetric package:
+  * Add security_protocol metric for channels
+  * Add sslciph label/tag for channels
+  * Fail connection in preference to warning when unexpected error
+  * Some versions don't support MQINQ(MQCA_VERSION) (#395)
+  * Add startTime (epoch, milliseconds) for all channel types
+  * Add active_service metric for qmgr
+  * Increase recommended max qdepth on replyQ as there are now more potential queue subscriptions
+
 ### Unreleased
 * Fix boolean logic for `isFirstCollection` in `mq_prometheus (#385)`
   * Ensure proper collection on the first poll and at regular intervals thereafter
+* Add showCustomAttribute filter config setting to include the CUSTOM attribute as metric tag/label
 
 ### Feb 28 2025 (v5.6.2)
 * Update to MQ 9.4.2
 * The "nhainstance" tag is renamed to "nha" to handle both instances and CRR groups
-  * Any dashboards related to NativeHA metrics may need to be updated  
+  * Any dashboards related to NativeHA metrics may need to be updated
   * Prometheus Logging.json example dashboard includes Cross-region replication metrics
 * Add amqsevtg sample
 
 ### Nov 01 2024 (no new version)
 * Move all sample container builds to use UBI base images
   * And ensure appropriate level of Go compiler is available
-  * Main "Dockerfile" has RDURL_ARG build-arg option to pull Redist client 
+  * Main "Dockerfile" has RDURL_ARG build-arg option to pull Redist client
     from an alternative location
 
 ### Oct 24 2024 (v5.6.1)

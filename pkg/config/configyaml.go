@@ -1,7 +1,7 @@
 package config
 
 /*
-  Copyright (c) IBM Corporation 2016, 2021
+  Copyright (c) IBM Corporation 2016, 2026
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -30,9 +30,11 @@ import (
 )
 
 type ConfigYGlobal struct {
-	UseObjectStatus    string `yaml:"useObjectStatus" default:"true"`
-	UseResetQStats     string `yaml:"useResetQStats" default:"false"`
-	UsePublications    string `yaml:"usePublications" default:"true"`
+	UseObjectStatus string `yaml:"useObjectStatus" default:"true"`
+	UseResetQStats  string `yaml:"useResetQStats" default:"false"`
+	UsePublications string `yaml:"usePublications" default:"true"`
+	UseStatistics   string `yaml:"useStatistics" default:"false"`
+
 	LogLevel           string `yaml:"logLevel"`
 	MetaPrefix         string
 	PollInterval       string `yaml:"pollInterval"`
@@ -45,21 +47,25 @@ type ConfigYConnection struct {
 	User             string
 	Client           string `yaml:"clientConnection" default:"false"`
 	Password         string
-	PasswordFile     string   `yaml:"passwordFile"`
-	ReplyQueue       string   `yaml:"replyQueue" `
-	ReplyQueue2      string   `yaml:"replyQueue2"`
-	DurableSubPrefix string   `yaml:"durableSubPrefix"`
-	CcdtUrl          string   `yaml:"ccdtUrl"`
-	ConnName         string   `yaml:"connName"`
-	Channel          string   `yaml:"channel"`
-	WaitInterval     string   `yaml:"waitInterval"`
-	MetadataTags     []string `yaml:"metadataTags"`
-	MetadataValues   []string `yaml:"metadataValues"`
+	PasswordFile     string            `yaml:"passwordFile"`
+	ReplyQueue       string            `yaml:"replyQueue" `
+	ReplyQueue2      string            `yaml:"replyQueue2"`
+	StatisticsQueue  string            `yaml:"statisticsQueue"`
+	DurableSubPrefix string            `yaml:"durableSubPrefix"`
+	CcdtUrl          string            `yaml:"ccdtUrl"`
+	ConnName         string            `yaml:"connName"`
+	Channel          string            `yaml:"channel"`
+	WaitInterval     string            `yaml:"waitInterval"`
+	MetadataTags     []string          `yaml:"metadataTags"`
+	MetadataValues   []string          `yaml:"metadataValues"`
+	MetadataMap      map[string]string `yaml:"metadataMap"`
 }
 type ConfigYObjects struct {
-	Queues        []string
-	Channels      []string
-	AMQPChannels  []string `yaml:"amqpChannels"`
+	Queues       []string
+	Channels     []string
+	AMQPChannels []string `yaml:"amqpChannels"`
+	MQTTChannels []string `yaml:"mqttChannels"`
+
 	Topics        []string
 	Subscriptions []string
 	// These are left here for now so they can be recognised but will cause an error because the
@@ -69,10 +75,14 @@ type ConfigYObjects struct {
 }
 
 type ConfigYFilters struct {
-	HideSvrConnJobname        string   `yaml:"hideSvrConnJobname" default:"false"`
-	HideAMQPClientId          string   `yaml:"hideAMQPClientId" default:"false"`
-	ShowInactiveChannels      string   `yaml:"showInactiveChannels" default:"false"`
-	QueueSubscriptionSelector []string `yaml:"queueSubscriptionSelector"`
+	HideSvrConnJobname        string      `yaml:"hideSvrConnJobname" default:"false"`
+	HideAMQPClientId          string      `yaml:"hideAMQPClientId" default:"false"`
+	HideMQTTClientId          string      `yaml:"hideMQTTClientId" default:"false"`
+	ShowInactiveChannels      string      `yaml:"showInactiveChannels" default:"false"`
+	ShowCustomAttribute       string      `yaml:"showCustomAttribute" default:"false"`
+	QueueSubscriptionSelector []string    `yaml:"queueSubscriptionSelector"`
+	MetricInclude             interface{} `yaml:"metricInclude"` // We'll convert these maps of arrays by hand:
+	MetricExclude             interface{} `yaml:"metricExclude"`
 }
 
 type ConfigMoved struct {
@@ -123,15 +133,20 @@ func asInt(s string, def int) int {
 
 // This handles the configuration parameters that are common to all the collectors. The individual
 // collectors call similar code for their own specific attributes
-func CopyYamlConfig(cm *Config, cyg ConfigYGlobal, cyc ConfigYConnection, cyo ConfigYObjects, cyf ConfigYFilters) {
+func CopyYamlConfig(cm *Config, cyg ConfigYGlobal, cyc ConfigYConnection, cyo ConfigYObjects, cyf ConfigYFilters) error {
 
-	cm.CC.UseStatus = CopyParmIfNotSetBool("global", "useObjectStatus", AsBool(cyg.UseObjectStatus, true))
+	var err error
+
+	// cm.CC.UseStatus = CopyParmIfNotSetBool("global", "useObjectStatus", AsBool(cyg.UseObjectStatus, true))
 	cm.CC.UseResetQStats = CopyParmIfNotSetBool("global", "useResetQStats", AsBool(cyg.UseResetQStats, false))
 	cm.CC.UsePublications = CopyParmIfNotSetBool("global", "usePublications", AsBool(cyg.UsePublications, true))
+	cm.CC.UseStatistics = CopyParmIfNotSetBool("global", "useStatistics", AsBool(cyg.UseStatistics, false))
 
 	cm.CC.ShowInactiveChannels = CopyParmIfNotSetBool("filters", "showInactiveChannels", AsBool(cyf.ShowInactiveChannels, false))
+	cm.CC.ShowCustomAttribute = CopyParmIfNotSetBool("filters", "showCustomAttribute", AsBool(cyf.ShowCustomAttribute, false))
 	cm.CC.HideSvrConnJobname = CopyParmIfNotSetBool("filters", "hideSvrConnJobname", AsBool(cyf.HideSvrConnJobname, false))
 	cm.CC.HideAMQPClientId = CopyParmIfNotSetBool("filters", "hideAMQPClientId", AsBool(cyf.HideAMQPClientId, false))
+	cm.CC.HideMQTTClientId = CopyParmIfNotSetBool("filters", "hideMQTTClientId", AsBool(cyf.HideMQTTClientId, false))
 
 	cm.QueueSubscriptionSelector = CopyParmIfNotSetStrArray("filters", "queueSubscriptionSelector", cyf.QueueSubscriptionSelector)
 
@@ -160,11 +175,14 @@ func CopyYamlConfig(cm *Config, cyg ConfigYGlobal, cyc ConfigYConnection, cyo Co
 		cm.ReplyQ = tmpQ
 	}
 	cm.ReplyQ2 = CopyParmIfNotSetStr("connection", "replyQueue2", cyc.ReplyQueue2)
+	cm.CC.StatisticsQ = CopyParmIfNotSetStr("connection", "statisticsQueue", cyc.StatisticsQueue)
+
 	cm.CC.DurableSubPrefix = CopyParmIfNotSetStr("connection", "durableSubPrefix", cyc.DurableSubPrefix)
 
 	cm.MonitoredQueues = CopyParmIfNotSetStrArray("objects", "queues", cyo.Queues)
 	cm.MonitoredChannels = CopyParmIfNotSetStrArray("objects", "channels", cyo.Channels)
 	cm.MonitoredAMQPChannels = CopyParmIfNotSetStrArray("objects", "amqpChannels", cyo.AMQPChannels)
+	cm.MonitoredMQTTChannels = CopyParmIfNotSetStrArray("objects", "mqttChannels", cyo.MQTTChannels)
 
 	cm.MonitoredTopics = CopyParmIfNotSetStrArray("objects", "topics", cyo.Topics)
 	cm.MonitoredSubscriptions = CopyParmIfNotSetStrArray("objects", "subscriptions", cyo.Subscriptions)
@@ -172,10 +190,81 @@ func CopyYamlConfig(cm *Config, cyg ConfigYGlobal, cyc ConfigYConnection, cyo Co
 	cfMoved.QueueSubscriptionSelector = CopyDeprecatedParmIfNotSetStrArray("objects", "queueSubscriptionSelector", cyo.QueueSubscriptionSelector)
 	cfMoved.ShowInactiveChannels = CopyDeprecatedParmIfNotSetStr("objects", "showInactiveChannels", cyo.ShowInactiveChannels)
 
-	cm.metadataTags = CopyParmIfNotSetStrArray("connection", "metadataTags", cyc.MetadataTags)
-	cm.metadataValues = CopyParmIfNotSetStrArray("connection", "metadataValues", cyc.MetadataValues)
+	// Prefer the YAML map construct instead of the array list. If the map is provided, then make sure
+	// that the tags/values arrays are built only from the map. Note that there is no command-line or env var
+	// equivalent of the map - those have to use the separate tags/values comma-separated strings.
+	if len(cyc.MetadataMap) == 0 {
+		cm.metadataTags = CopyParmIfNotSetStrArray("connection", "metadataTags", cyc.MetadataTags)
+		cm.metadataValues = CopyParmIfNotSetStrArray("connection", "metadataValues", cyc.MetadataValues)
+	} else {
+		cm.metadataTags = ""
+		cm.metadataValues = ""
+		for k, v := range cyc.MetadataMap {
+			cm.MetadataTagsArray = append(cm.MetadataTagsArray, k)
+			cm.MetadataValuesArray = append(cm.MetadataValuesArray, v)
+		}
+	}
 
-	return
+	// Populate the metric include/exclude maps in the ConnectionConfig structure.
+	// Only do this if the corresponding parameter has not already been set by command line
+	// parms or an environment variable
+
+	// These maps are how we parse the YAML elements. Errors in the YAML file will likely lead
+	// to panics
+	var im map[interface{}]interface{}
+	var em map[interface{}]interface{}
+	var emptyStruc struct{}
+
+	imi := cyf.MetricInclude
+	if imi != nil {
+		im = imi.(map[interface{}]interface{})
+	}
+	emi := cyf.MetricExclude
+	if emi != nil {
+		em = emi.(map[interface{}]interface{})
+	}
+
+	if im != nil {
+		for k, v := range im {
+			otStr := k.(string)
+			otIdx, _ := otString[otStr]
+			s := filters[otIdx].include
+			if s == "" && v != nil {
+				v2, ok := v.([]interface{})
+				if ok {
+					for _, b := range v2 {
+						cm.CC.MetricFilter[otIdx].Include[b.(string)] = emptyStruc
+					}
+				} else {
+					err = fmt.Errorf("Failure parsing YAML configuration file")
+				}
+			} else {
+				//fmt.Printf("Ignoring already-configured include string for %s: %s\n", otStr, s)
+			}
+		}
+	}
+	if em != nil {
+		for k, v := range em {
+			otStr := k.(string)
+			otIdx, _ := otString[otStr]
+			s := filters[otIdx].exclude
+			if s == "" && v != nil {
+				v2, ok := v.([]interface{})
+				if ok {
+
+					for _, b := range v2 {
+						cm.CC.MetricFilter[otIdx].Exclude[b.(string)] = emptyStruc
+					}
+				} else {
+					err = fmt.Errorf("Failure parsing YAML configuration file")
+				}
+			} else {
+				//fmt.Printf("Ignoring already-configured exclude string for %s: %s\n", otStr, s)
+			}
+		}
+	}
+
+	return err
 }
 
 // If the parameter has already been set by env var or cli, then the value in the main config structure is returned. Otherwise

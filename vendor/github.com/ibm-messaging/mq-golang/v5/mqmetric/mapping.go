@@ -1,8 +1,3 @@
-/*
-Package mqmetric contains a set of routines common to several
-commands used to export MQ metrics to different backend
-storage mechanisms including Prometheus and InfluxDB.
-*/
 package mqmetric
 
 /*
@@ -244,6 +239,9 @@ var mHeur = map[string]string{
 	"synchronous_log_data_average_compression_time":   "synchronous_log_data_average_compression_time_bytes",
 	"synchronous_log_data_average_decompression_time": "synchronous_log_data_average_decompression_time_bytes",
 	"synchronous_uncompressed_log_bytes_sent":         "synchronous_uncompressed_log_sent_bytes",
+	"backlog_long-term_average_bytes":                 "backlog_long_term_average_bytes",
+	"catch-up_time_percentage":                        "catch_up_time_percentage",
+	"throttling_time_percentage":                      "throttling_time_percentage",
 }
 
 // This map contains only the additional elements where the heuristic version might not be suitable or
@@ -286,6 +284,12 @@ var mAttr = map[string]string{
 	"messages_rcvd": "messages_rcvd",
 	"messages_sent": "messages_sent",
 
+	// MQTT CHANNELS
+	"indoubt_input":    "indoubt_input",
+	"indoubt_output":   "indoubt_output",
+	"pending_outbound": "pending_outbound",
+	"protocol":         "protocol",
+
 	// CHANNELS
 	"batches":             "batches",
 	"batchsz_long":        "batchsz_long",
@@ -311,6 +315,9 @@ var mAttr = map[string]string{
 	"type":                "type",
 	"xmitq_time_long":     "xmitq_time_long",
 	"xmitq_time_short":    "xmitq_time_short",
+	"sslciph":             "sslciph",
+	"security_protocol":   "security_protocol",
+	"start_epoch":         "start_epoch",
 
 	// CLUSTER
 	"qmtype": "qmtype",
@@ -319,6 +326,7 @@ var mAttr = map[string]string{
 
 	// QMGR
 	"active_listeners":         "active_listeners",
+	"active_services":          "active_services",
 	"channel_initiator_status": "channel_initiator_status",
 	"command_server_status":    "command_server_status",
 	"connection_count":         "connection_count",
@@ -334,7 +342,8 @@ var mAttr = map[string]string{
 	"max_channels":             "max_channels",
 	"max_tcp_channels":         "max_tcp_channels",
 	// "status":                   "status",
-	"uptime": "uptime",
+	"uptime":          "uptime",
+	"log_start_epoch": "log_start_epoch",
 
 	// QUEUE
 	"qfile_current_size":   "qfile_current_size",

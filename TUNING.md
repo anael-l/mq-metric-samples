@@ -20,8 +20,8 @@ If you cannot avoid running as a client (for example, you are trying to monitor 
 network latency between the queue manager and collector as low as possible. For z/OS, you might consider running the
 collector in a zLinux LPAR on the same machine. Or perhaps in a zCX container.
 
-If you are running as a client, then configure it to take advantage of readahead when getting publications. This is done by
-setting `DEFREADA(YES)` on the nominated ReplyQueue(s).
+If you are running as a client, then consider configuring it to take advantage of readahead when getting publications.
+This is done by setting `DEFREADA(YES)` on the nominated ReplyQueue(s).
 
 ## Collection processing time
 The collector reports on how long it takes to collect and process the data on each interval. You can see this in a debug
@@ -74,9 +74,9 @@ durable subscriptions.
 
 * You can reduce the total number of subscriptions made for queue metrics. The `filters.queueSubscriptionSelector` list
   defines the sets of topics that you might be interested in. The complete set - for now - is
-  [OPENCLOSE, INQSET, PUT, GET, GENERAL]. In many cases, only the last three of these may be of interest. The smaller
-  set reduces the number of publications per queue. Within each set, multiple metrics are created but there is no way to
-  report on only a subset of the metrics in each set.
+  [ OPENCLOSE, INQSET, EXTENDED, PUT, GET, GENERAL ]. In many cases, only the last three of these may be of interest.
+  The smaller set reduces the number of publications per queue.  The `EXTENDED` set is already excluded by default as
+  it is primarily intended for the L2/L3 support team.
 
 * You can choose to not subscribe to any queue metrics, but still subscribe to metrics for other resources such as the
   queue manager and Native HA by setting the filter to `NONE`. If you do this, then many queue metrics become
@@ -90,25 +90,51 @@ only positive wildcards. That allows the `DISPLAY xxSTATUS` requests to pass the
 manager commands; if there are any negative patterns, the collector has to work out which objects match the pattern, and
 then inquire for the remainder individually.
 
+## Reducing the number of reported metrics
+Each object type can have an subset of the metrics reported via include/exclude lists. This does not affect how much
+data is collected from the queue manager, but it does affect how much is then reported to the backend. It might be of
+particular interest in environments (eg clouds) where you get charged essentially per metric.
+
+The configuration is set up in the `filters` section of the YAML file, with the `metricInclude` or `metricExclude`
+blocks containing arrays associated with each of the object types. If an object has an exclude list, then all items except
+those metrics are reported; if an object has an include list, only those items are reported.
+
+Look at the `cf.common.yaml` file to see a skeleton of the configuration options. Running a collector with the debug
+mode might help you construct the filters.
+
 ## Other configuration options
 The `global.pollInterval` and `global.rediscoverInterval` options may help to further reduce inquiries.
 
-The first of these controls how frequently the `DISPLAY xxSTATUS` commands are used, assuming the
-`global.useObjectStatus` is `true`. In some circumstances, you might not want all of the responses as regularly as the
-published metrics are handled.
+The first of these controls how frequently the `DISPLAY xxSTATUS` commands are used.
 
 The second attribute controls how frequently the collector reassesses the list of objects to be monitored, and their
 more stable attributes. For example, the `DESCRIPTION` or `MAXDEPTH` settings on a queue. If you have a large number of
 queues that do not change frequently, then you might want to increase the rediscovery attribute. The default is 1 hour.
 The tradeoff here is that newly-defined queues may not have any metrics reported until this interval expires.
 
+The messages created by the queue manager ought to be non-persistent. There is no real value in preserving them across a
+restart. Check that the configured reply queues, whether model or local queues, have `DEFPSIST(NO)`.
+
+## Using statistics event messages instead of published resource metrics
+Using these messages is unlikely to significantly change performance characteristics. But it might be worth
+experimenting, especially if the `monitoredQueues` configuration is set to only select a small percentage of the actual
+local queues defined on a queue manager. The [README](README.md) file has a section on how to configure this variation
+for metric collection. But it's worth repeating here that while there is a lot of overlap between the STATQ/STATMQI
+events and the STATQ/STATMQI classes for published metrics, they are not identical. Some metrics can be found only in
+one of the sets, and some only in the other.
+
+Tuning options here might come from the `STATINT` value, and the number of queues that have `STATQ(ON)` or
+`STATQ(QMGR)`. The `STATINT` should probably be set to approximately the same as the collector's `interval` timer. The
+queue manager writes the `STATQ` events with multiple queues' information in a single message. So the maximum queue
+depth on the reply queues is unlikely to be problematic.
+
 ## Dividing the workload
-One further approach that you might like to consider, though I wouldn't usually recommend it, is to have two or more
-collectors running against the same queue manager. And then configure different sets of queues to be monitored. So a
-collector listening on port 9157 might manage queues A*-M*, while another collector on port 9158 monitors queues N*-Z*.
-You would likely need additional configuration to reduce duplication of other components, for example by using the
-`jobname` or `instance` as a filter element on dashboard queries, but it might be one way to reduce the time taken for a
-single scrape.
+One further approach that you might like to consider, though I wouldn't recommend it, is to have two or more collectors
+running against the same queue manager. And then configure different sets of queues to be monitored. So a collector
+listening on port 9157 might manage queues A*-M*, while another collector on port 9158 monitors queues N*-Z*. You would
+likely need additional configuration to reduce duplication of other components, for example by using the `jobname` or
+`instance` as a filter element on dashboard queries, but it might be one way to reduce the time taken for a single
+scrape.
 
 ## Very slow queue managers
 The collectors wait for a short time for each response to a status request. If the timeout expires with no expected

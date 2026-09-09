@@ -23,6 +23,7 @@ import (
 	"crypto/tls"
 	"net/http"
 	"os"
+	"strconv"
 
 	"strings"
 	"sync"
@@ -63,6 +64,12 @@ func main() {
 			os.Exit(72) // Same as strmqm "queue manager name error"
 		}
 	*/
+
+	// This env var is purely for internal testing purposes
+	utEnv := "MQIGO_UNITTEST_MAX_LOOPS"
+	if os.Getenv(utEnv) != "" {
+		unittestMaxLoops, _ = strconv.Atoi(os.Getenv(utEnv))
+	}
 
 	if err != nil {
 		log.Error(err)
@@ -139,8 +146,10 @@ func main() {
 					discoverConfig.MonitoredQueues.UseWildcard = wildcardResource
 					discoverConfig.MetaPrefix = config.cf.MetaPrefix
 					err = mqmetric.DiscoverAndSubscribe(discoverConfig)
-					mqmetric.RediscoverAttributes(ibmmq.MQOT_CHANNEL, config.cf.MonitoredChannels)
-					log.Debugf("Returned from RediscoverAttributes with error %v", err)
+					e := mqmetric.RediscoverAttributes(ibmmq.MQOT_CHANNEL, config.cf.MonitoredChannels)
+					_ = mqmetric.RediscoverAttributes(mqmetric.OT_CHANNEL_MQTT, config.cf.MonitoredMQTTChannels)
+
+					log.Debugf("Returned from RediscoverAttributes with error %v  tempErr %v", err, e)
 				}
 
 				if err == nil {
@@ -203,6 +212,52 @@ func main() {
 	}
 }
 
+// Experimenting ...
+// See https://github.com/prometheus/exporter-toolkit/blob/master/web/handler.go
+// for an example of how we might add authentication via Basic Auth in here.
+//
+// This function lets us chain handlers, inserting our own processing on the way
+// before the prometheus handler does any work.
+// The basic_auth block in the prometheus engine yaml gives us a plaintext password that
+// can be crypted/hashed and compared to what's in a local config store. If it's OK, then
+// pass the request on to the real processor. Otherwise fail with a suitable HTTP code and
+// response. Since this is called on every scrape, we'd want to cache the results of the crypt.
+/*
+func myHandler(next http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authOK := true
+		u, p, auth := r.BasicAuth()
+		// log.Infof("   U: %s P: %s A:%v", u, p, auth)
+		//log.Infof("Handler headers: %v", r.Header)
+		//authHeader, ok := r.Header["Authorization"]
+		//if ok {
+		//	log.Infof("Auth header: %s", authHeader)
+		//} else {
+		//	log.Infof("Auth header: %s", "N/A")
+		//}
+		if auth {
+			authOK = validateUP(u, p)
+		}
+
+		if authOK {
+			next.ServeHTTP(w, r)
+		} else {
+			w.Header().Set("WWW-Authenticate", "Basic")
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		}
+	})
+}
+// A rather simplistic validator!
+func validateUP(u string, p string) bool {
+	rc := true
+	if u != "user" || p != "password" {
+		rc = false
+	}
+
+	return rc
+}
+*/
+
 func startServer() {
 	var err error
 	// This function starts a new thread to handle the web server that will then run
@@ -210,9 +265,14 @@ func startServer() {
 
 	// Need to wait until signalled by the main thread that it's setup the gauges
 	log.Debug("HTTP server - waiting until MQ connection ready")
+
+	//myHandlerFunc := myHandler(promhttp.Handler().(http.HandlerFunc))
+
 	<-startChannel
 
 	http.Handle(config.httpMetricPath, promhttp.Handler())
+	//http.Handle(config.httpMetricPath, myHandlerFunc)
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write(landingPage())
 	})

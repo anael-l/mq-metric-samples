@@ -1,12 +1,7 @@
-/*
-Package mqmetric contains a set of routines common to several
-commands used to export MQ metrics to different backend
-storage mechanisms including Prometheus and InfluxDB.
-*/
 package mqmetric
 
 /*
-  Copyright (c) IBM Corporation 2018,2025
+  Copyright (c) IBM Corporation 2018,2026
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -48,6 +43,7 @@ const (
 	ATTR_QMGR_MAX_ACTIVE_CHANNELS = "max_active_channels"
 	ATTR_QMGR_MAX_TCP_CHANNELS    = "max_tcp_channels"
 	ATTR_QMGR_ACTIVE_LISTENERS    = "active_listeners"
+	ATTR_QMGR_ACTIVE_SERVICES     = "active_services"
 
 	// Some of the log-related metrics are effectively duplicated between QMSTATUS and
 	// published resources eg LOGUTIL. We prefer the publication versions so do not
@@ -62,6 +58,7 @@ const (
 	ATTR_QMGR_LOG_ARCHIVE_SIZE  = "log_size_archive"
 	ATTR_QMGR_LOG_RESTART_SIZE  = "log_size_restart"
 	ATTR_QMGR_LOG_REUSABLE_SIZE = "log_size_reusable"
+	ATTR_QMGR_LOG_START         = "log_start_epoch"
 )
 
 /*
@@ -75,65 +72,52 @@ for now.
 func QueueManagerInitAttributes() {
 
 	traceEntry("QueueManagerInitAttributes")
+	ot := OT_Q_MGR
 	ci := getConnection(GetConnectionKey())
-	os := &ci.objectStatus[OT_Q_MGR]
-	st := GetObjectStatus(GetConnectionKey(), OT_Q_MGR)
+	os := &ci.objectStatus[ot]
+	st := GetObjectStatus(GetConnectionKey(), ot)
 	if os.init {
 		traceExit("QueueManagerInitAttributes", 1)
 		return
 	}
+
 	st.Attributes = make(map[string]*StatusAttribute)
 
-	attr := ATTR_QMGR_NAME
-	st.Attributes[attr] = newPseudoStatusAttribute(attr, "Queue Manager Name")
+	newPseudoStatusMapEntryRequired(st, ot, ATTR_QMGR_NAME, "Queue Manager Name")
 
 	if GetPlatform() != ibmmq.MQPL_ZOS {
-		attr = ATTR_QMGR_UPTIME
-		st.Attributes[attr] = newStatusAttribute(attr, "Up time", -1)
+		newStatusMapEntry(st, ot, ATTR_QMGR_UPTIME, "Up time", DUMMY_PCFATTR, false)
 
 		// These are the integer status fields that are of interest
-		attr = ATTR_QMGR_CONNECTION_COUNT
-		st.Attributes[attr] = newStatusAttribute(attr, "Connection Count", ibmmq.MQIACF_CONNECTION_COUNT)
-		attr = ATTR_QMGR_CHINIT_STATUS
-		st.Attributes[attr] = newStatusAttribute(attr, "Channel Initiator Status", ibmmq.MQIACF_CHINIT_STATUS)
-		attr = ATTR_QMGR_CMD_SERVER_STATUS
-		st.Attributes[attr] = newStatusAttribute(attr, "Command Server Status", ibmmq.MQIACF_CMD_SERVER_STATUS)
-		attr = ATTR_QMGR_ACTIVE_LISTENERS
-		st.Attributes[attr] = newStatusAttribute(attr, "Active Listener Count", -1)
+		newStatusMapEntry(st, ot, ATTR_QMGR_CONNECTION_COUNT, "Connection Count", ibmmq.MQIACF_CONNECTION_COUNT, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_CHINIT_STATUS, "Channel Initiator Status", ibmmq.MQIACF_CHINIT_STATUS, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_CMD_SERVER_STATUS, "Command Server Status", ibmmq.MQIACF_CMD_SERVER_STATUS, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_ACTIVE_LISTENERS, "Active Listener Count", DUMMY_PCFATTR, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_ACTIVE_SERVICES, "Active Service Count", DUMMY_PCFATTR, false)
 
 		// Log-related metrics
-		attr = ATTR_QMGR_LOG_CURRENT_EXTENT
-		st.Attributes[attr] = newStatusAttribute(attr, "Log Current Extent", -1)
-		attr = ATTR_QMGR_LOG_MEDIA_EXTENT
-		st.Attributes[attr] = newStatusAttribute(attr, "Log Media Extent", -1)
-		attr = ATTR_QMGR_LOG_ARCHIVE_EXTENT
-		st.Attributes[attr] = newStatusAttribute(attr, "Log Archive Extent", -1)
-		attr = ATTR_QMGR_LOG_RESTART_EXTENT
-		st.Attributes[attr] = newStatusAttribute(attr, "Log Restart Recovery Extent", -1)
+		newStatusMapEntry(st, ot, ATTR_QMGR_LOG_CURRENT_EXTENT, "Log Current Extent", DUMMY_PCFATTR, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_LOG_MEDIA_EXTENT, "Log Media Extent", DUMMY_PCFATTR, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_LOG_ARCHIVE_EXTENT, "Log Archive Extent", DUMMY_PCFATTR, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_LOG_RESTART_EXTENT, "Log Restart Recovery Extent", DUMMY_PCFATTR, false)
 
-		attr = ATTR_QMGR_LOG_MEDIA_SIZE
-		st.Attributes[attr] = newStatusAttribute(attr, "Log Media Size", ibmmq.MQIACF_MEDIA_LOG_SIZE)
-		attr = ATTR_QMGR_LOG_ARCHIVE_SIZE
-		st.Attributes[attr] = newStatusAttribute(attr, "Log Archive Size", ibmmq.MQIACF_ARCHIVE_LOG_SIZE)
-		attr = ATTR_QMGR_LOG_RESTART_SIZE
-		st.Attributes[attr] = newStatusAttribute(attr, "Log Restart Recovery Size", ibmmq.MQIACF_RESTART_LOG_SIZE)
-		attr = ATTR_QMGR_LOG_REUSABLE_SIZE
-		st.Attributes[attr] = newStatusAttribute(attr, "Log Reusable Size", ibmmq.MQIACF_REUSABLE_LOG_SIZE)
+		newStatusMapEntry(st, ot, ATTR_QMGR_LOG_MEDIA_SIZE, "Log Media Size", ibmmq.MQIACF_MEDIA_LOG_SIZE, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_LOG_ARCHIVE_SIZE, "Log Archive Size", ibmmq.MQIACF_ARCHIVE_LOG_SIZE, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_LOG_RESTART_SIZE, "Log Restart Recovery Size", ibmmq.MQIACF_RESTART_LOG_SIZE, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_LOG_REUSABLE_SIZE, "Log Reusable Size", ibmmq.MQIACF_REUSABLE_LOG_SIZE, false)
+
+		newStatusMapEntry(st, ot, ATTR_QMGR_LOG_START, "Log Start Time (epoch ms)", DUMMY_PCFATTR, false)
 
 	} else {
-		attr = ATTR_QMGR_MAX_CHANNELS
-		st.Attributes[attr] = newStatusAttribute(attr, "Max Channels", -1)
-		attr = ATTR_QMGR_MAX_TCP_CHANNELS
-		st.Attributes[attr] = newStatusAttribute(attr, "Max TCP Channels", -1)
-		attr = ATTR_QMGR_MAX_ACTIVE_CHANNELS
-		st.Attributes[attr] = newStatusAttribute(attr, "Max Active Channels", -1)
+		newStatusMapEntry(st, ot, ATTR_QMGR_MAX_CHANNELS, "Max Channels", DUMMY_PCFATTR, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_MAX_TCP_CHANNELS, "Max TCP Channels", DUMMY_PCFATTR, false)
+		newStatusMapEntry(st, ot, ATTR_QMGR_MAX_ACTIVE_CHANNELS, "Max Active Channels", DUMMY_PCFATTR, false)
 	}
 
 	// The qmgr status is reported to Prometheus with some pseudo-values so we can see if
 	// we are not actually connected. On other collectors, the whole collection process is
 	// halted so this would not be reported.
-	attr = ATTR_QMGR_STATUS
-	st.Attributes[attr] = newStatusAttribute(attr, "Queue Manager Status", ibmmq.MQIACF_Q_MGR_STATUS)
+	newStatusMapEntryRequired(st, ot, ATTR_QMGR_STATUS, "Queue Manager Status", ibmmq.MQIACF_Q_MGR_STATUS)
 
 	os.init = true
 
@@ -162,6 +146,9 @@ func CollectQueueManagerStatus() error {
 			err = collectQueueManagerListeners()
 		}
 		if err == nil {
+			err = collectQueueManagerServices()
+		}
+		if err == nil {
 			err = collectQueueManagerStatus(ibmmq.MQOT_Q_MGR)
 		}
 	}
@@ -187,6 +174,10 @@ func collectQueueManagerAttrsZOS() error {
 		ibmmq.MQIA_TCP_CHANNELS,
 		ibmmq.MQIA_MAX_CHANNELS}
 
+	if ci.showCustomAttribute {
+		selectors = append(selectors, ibmmq.MQCA_CUSTOM)
+	}
+
 	v, err := ci.si.qMgrObject.Inq(selectors)
 	if err == nil {
 		maxchls := v[ibmmq.MQIA_MAX_CHANNELS].(int32)
@@ -195,15 +186,34 @@ func collectQueueManagerAttrsZOS() error {
 		desc := v[ibmmq.MQCA_Q_MGR_DESC].(string)
 
 		key := v[ibmmq.MQCA_Q_MGR_NAME].(string)
-		st.Attributes[ATTR_QMGR_MAX_ACTIVE_CHANNELS].Values[key] = newStatusValueInt64(int64(maxact))
-		st.Attributes[ATTR_QMGR_MAX_CHANNELS].Values[key] = newStatusValueInt64(int64(maxchls))
-		st.Attributes[ATTR_QMGR_MAX_TCP_CHANNELS].Values[key] = newStatusValueInt64(int64(maxtcp))
-		st.Attributes[ATTR_QMGR_NAME].Values[key] = newStatusValueString(key)
+
+		a, ok := st.Attributes[ATTR_QMGR_MAX_ACTIVE_CHANNELS]
+		if ok {
+			a.Values[key] = newStatusValueInt64(int64(maxact))
+		}
+		a, ok = st.Attributes[ATTR_QMGR_MAX_CHANNELS]
+		if ok {
+			a.Values[key] = newStatusValueInt64(int64(maxchls))
+		}
+		a, ok = st.Attributes[ATTR_QMGR_MAX_TCP_CHANNELS]
+		if ok {
+			a.Values[key] = newStatusValueInt64(int64(maxtcp))
+		}
+		a, ok = st.Attributes[ATTR_QMGR_NAME]
+		if ok {
+			a.Values[key] = newStatusValueString(key)
+		}
 		// This pseudo-value will always get filled in for a z/OS qmgr - we know it's running because
 		// we've been able to connect!
-		st.Attributes[ATTR_QMGR_STATUS].Values[key] = newStatusValueInt64(int64(ibmmq.MQQMSTA_RUNNING))
+		a, ok = st.Attributes[ATTR_QMGR_STATUS]
+		if ok {
+			a.Values[key] = newStatusValueInt64(int64(ibmmq.MQQMSTA_RUNNING))
+		}
 		qMgrInfo.Description = desc
 		qMgrInfo.QMgrName = key
+		if ci.showCustomAttribute {
+			qMgrInfo.Custom = v[ibmmq.MQCA_CUSTOM].(string)
+		}
 	}
 	traceExitErr("collectQueueManagerAttrsZOS", 0, err)
 
@@ -217,16 +227,21 @@ func collectQueueManagerAttrsDist() error {
 	st := GetObjectStatus(GetConnectionKey(), OT_Q_MGR)
 
 	selectors := []int32{ibmmq.MQCA_Q_MGR_NAME,
-		ibmmq.MQCA_Q_MGR_DESC}
+		ibmmq.MQCA_Q_MGR_DESC, ibmmq.MQCA_CUSTOM}
 
 	v, err := ci.si.qMgrObject.Inq(selectors)
 	desc := DUMMY_STRING
+	custom := DUMMY_STRING
+
 	if err == nil {
 		key := v[ibmmq.MQCA_Q_MGR_NAME].(string)
 		desc = v[ibmmq.MQCA_Q_MGR_DESC].(string)
+		custom = v[ibmmq.MQCA_CUSTOM].(string)
+
 		st.Attributes[ATTR_QMGR_NAME].Values[key] = newStatusValueString(key)
 		qMgrInfo.Description = desc
 		qMgrInfo.QMgrName = key
+		qMgrInfo.Custom = custom
 	}
 
 	traceExitErr("collectQueueManagerAttrsDist", 0, err)
@@ -279,7 +294,7 @@ func collectQueueManagerListeners() error {
 	for allReceived := false; !allReceived; {
 		cfh, buf, allReceived, err = statusGetReply(putmqmd.MsgId)
 		if buf != nil {
-			if parseQMgrListeners(cfh, buf) {
+			if parseQMgrActiveProcesses(cfh, buf) {
 				listenerCount++
 			}
 		}
@@ -288,10 +303,75 @@ func collectQueueManagerListeners() error {
 	logDebug("Getting listener count for %s as %d", qMgrInfo.QMgrName, listenerCount)
 
 	if qMgrInfo.QMgrName != "" {
-		st.Attributes[ATTR_QMGR_ACTIVE_LISTENERS].Values[qMgrInfo.QMgrName] = newStatusValueInt64(int64(listenerCount))
+		v, ok := st.Attributes[ATTR_QMGR_ACTIVE_LISTENERS]
+		if ok {
+			v.Values[qMgrInfo.QMgrName] = newStatusValueInt64(int64(listenerCount))
+		}
 	}
 
 	traceExitErr("collectQueueManagerListeners", 0, err)
+
+	return err
+}
+
+// We collect the number of active services. The details of
+// the services are not suitable for metrics, but the total number might be interesting.
+// "Active" includes the starting/stopping states that might be reported.
+func collectQueueManagerServices() error {
+	var err error
+
+	traceEntry("collectQueueManagerServices")
+
+	serviceCount := 0
+
+	ci := getConnection(GetConnectionKey())
+	st := GetObjectStatus(GetConnectionKey(), OT_Q_MGR)
+	statusClearReplyQ()
+	putmqmd, pmo, cfh, buf := statusSetCommandHeaders()
+	// Can allow all the other fields to default
+	// Only active or transitioning listeners return a response.
+	cfh.Command = ibmmq.MQCMD_INQUIRE_SERVICE_STATUS
+
+	// Add the parameters one at a time into a buffer
+	pcfparm := new(ibmmq.PCFParameter)
+	pcfparm.Type = ibmmq.MQCFT_STRING
+	pcfparm.Parameter = ibmmq.MQCA_SERVICE_NAME
+	pcfparm.String = []string{"*"}
+	cfh.ParameterCount++
+	buf = append(buf, pcfparm.Bytes()...)
+
+	// Once we know the total number of parameters, put the
+	// CFH header on the front of the buffer.
+	buf = append(cfh.Bytes(), buf...)
+
+	// And now put the command to the queue
+	err = ci.si.cmdQObj.Put(putmqmd, pmo, buf)
+	if err != nil {
+		traceExitErr("collectQueueManagerServices", 1, err)
+		return err
+	}
+
+	// Now get the responses - loop until all have been received (one
+	// per queue) or we run out of time
+	for allReceived := false; !allReceived; {
+		cfh, buf, allReceived, err = statusGetReply(putmqmd.MsgId)
+		if buf != nil {
+			if parseQMgrActiveProcesses(cfh, buf) {
+				serviceCount++
+			}
+		}
+	}
+
+	logDebug("Getting service count for %s as %d", qMgrInfo.QMgrName, serviceCount)
+
+	if qMgrInfo.QMgrName != "" {
+		v, ok := st.Attributes[ATTR_QMGR_ACTIVE_SERVICES]
+		if ok {
+			v.Values[qMgrInfo.QMgrName] = newStatusValueInt64(int64(serviceCount))
+		}
+	}
+
+	traceExitErr("collectQueueManagerServices", 0, err)
 
 	return err
 }
@@ -326,7 +406,7 @@ func collectQueueManagerStatus(instanceType int32) error {
 	for allReceived := false; !allReceived; {
 		cfh, buf, allReceived, err = statusGetReply(putmqmd.MsgId)
 		if buf != nil {
-			parseQMgrData(instanceType, cfh, buf)
+			parseQMgrStatusData(instanceType, cfh, buf)
 		}
 	}
 
@@ -335,10 +415,10 @@ func collectQueueManagerStatus(instanceType int32) error {
 }
 
 // Given a PCF response message, parse it to extract the desired statistics
-func parseQMgrData(instanceType int32, cfh *ibmmq.MQCFH, buf []byte) string {
+func parseQMgrStatusData(instanceType int32, cfh *ibmmq.MQCFH, buf []byte) string {
 	var elem *ibmmq.PCFParameter
 
-	traceEntry("parseQMgrData")
+	traceEntry("parseQMgrStatusData")
 
 	st := GetObjectStatus(GetConnectionKey(), OT_Q_MGR)
 
@@ -347,13 +427,15 @@ func parseQMgrData(instanceType int32, cfh *ibmmq.MQCFH, buf []byte) string {
 
 	startTime := ""
 	startDate := ""
+	logStartTime := ""
+	logStartDate := ""
 
 	parmAvail := true
 	bytesRead := 0
 	offset := 0
 	datalen := len(buf)
 	if cfh == nil || cfh.ParameterCount == 0 {
-		traceExit("parseQMgrData", 1)
+		traceExit("parseQMgrStatusData", 1)
 		return ""
 	}
 
@@ -400,38 +482,63 @@ func parseQMgrData(instanceType int32, cfh *ibmmq.MQCFH, buf []byte) string {
 
 			// Log-related attributes naming an extent will need conversion from a string to an integer
 			case ibmmq.MQCACF_CURRENT_LOG_EXTENT_NAME:
-				st.Attributes[ATTR_QMGR_LOG_CURRENT_EXTENT].Values[key] = newStatusValueInt64(logExtent(elem.String[0]))
+				v, ok := st.Attributes[ATTR_QMGR_LOG_CURRENT_EXTENT]
+				if ok {
+					v.Values[key] = newStatusValueInt64(logExtent(elem.String[0]))
+				}
 			case ibmmq.MQCACF_MEDIA_LOG_EXTENT_NAME:
-				st.Attributes[ATTR_QMGR_LOG_MEDIA_EXTENT].Values[key] = newStatusValueInt64(logExtent(elem.String[0]))
+				v, ok := st.Attributes[ATTR_QMGR_LOG_MEDIA_EXTENT]
+				if ok {
+					v.Values[key] = newStatusValueInt64(logExtent(elem.String[0]))
+				}
 			case ibmmq.MQCACF_ARCHIVE_LOG_EXTENT_NAME:
-				st.Attributes[ATTR_QMGR_LOG_ARCHIVE_EXTENT].Values[key] = newStatusValueInt64(logExtent(elem.String[0]))
+				v, ok := st.Attributes[ATTR_QMGR_LOG_ARCHIVE_EXTENT]
+				if ok {
+					v.Values[key] = newStatusValueInt64(logExtent(elem.String[0]))
+				}
 			case ibmmq.MQCACF_RESTART_LOG_EXTENT_NAME:
-				st.Attributes[ATTR_QMGR_LOG_RESTART_EXTENT].Values[key] = newStatusValueInt64(logExtent(elem.String[0]))
+				v, ok := st.Attributes[ATTR_QMGR_LOG_RESTART_EXTENT]
+				if ok {
+					v.Values[key] = newStatusValueInt64(logExtent(elem.String[0]))
+				}
+			case ibmmq.MQCACF_LOG_START_TIME:
+				logStartTime = strings.TrimSpace(elem.String[0])
+			case ibmmq.MQCACF_LOG_START_DATE:
+				logStartDate = strings.TrimSpace(elem.String[0])
 			}
 		}
 	}
 
-	now := time.Now()
-	st.Attributes[ATTR_QMGR_UPTIME].Values[key] = newStatusValueInt64(statusTimeDiff(now, startDate, startTime))
+	v, ok := st.Attributes[ATTR_QMGR_UPTIME]
+	if ok {
+		now := time.Now()
+		v.Values[key] = newStatusValueInt64(statusTimeDiff(now, startDate, startTime))
+	}
 	qMgrInfo.HostName = hostname
 
-	traceExitF("parseQMgrData", 0, "Key: %s", key)
+	v, ok = st.Attributes[ATTR_QMGR_LOG_START]
+	if ok {
+		epoch := statusTimeEpoch(logStartDate, logStartTime)
+		v.Values[key] = newStatusValueInt64(epoch)
+	}
+
+	traceExitF("parseQMgrStatusData", 0, "Key: %s", key)
 	return key
 }
 
 // Given a PCF response message, parse it to extract the desired statistics
-func parseQMgrListeners(cfh *ibmmq.MQCFH, buf []byte) bool {
+func parseQMgrActiveProcesses(cfh *ibmmq.MQCFH, buf []byte) bool {
 	//var elem *ibmmq.PCFParameter
 
-	traceEntry("parseQMgrListeners")
-	listener := false
+	traceEntry("parseQMgrActiveProcesses")
+	process := false
 
 	parmAvail := true
 	bytesRead := 0
 	offset := 0
 	datalen := len(buf)
 	if cfh == nil || cfh.ParameterCount == 0 {
-		traceExit("parseQMgrListeners", 1)
+		traceExit("parseQMgrActiveProcesses", 1)
 		return false
 	}
 
@@ -443,11 +550,11 @@ func parseQMgrListeners(cfh *ibmmq.MQCFH, buf []byte) bool {
 		if offset >= datalen {
 			parmAvail = false
 		}
-		listener = true
+		process = true
 	}
 
-	traceExitF("parseQMgrListeners", 0, "active: %v", listener)
-	return listener
+	traceExitF("parseQMgrActiveProcesses", 0, "active: %v", process)
+	return process
 }
 
 // A log extent is reported by the qmgr with a name like "S001234.LOG". We

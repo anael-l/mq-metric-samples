@@ -1,7 +1,7 @@
 package main
 
 /*
-  Copyright (c) IBM Corporation 2016, 2021
+  Copyright (c) IBM Corporation 2016, 2026
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -19,8 +19,9 @@ package main
 */
 
 import (
-	"fmt"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 
 	cf "github.com/ibm-messaging/mq-metric-samples/v5/pkg/config"
 )
@@ -93,7 +94,7 @@ func initConfig() error {
 	cf.AddParm(&config.httpsKeyFile, "", cf.CP_STR, "ibmmq.httpsKeyFile", "prometheus", "httpsKeyFile", "TLS private key file")
 
 	cf.AddParm(&config.namespace, defaultNamespace, cf.CP_STR, "namespace", "prometheus", "namespace", "Namespace for metrics")
-	cf.AddParm(&config.overrideCType, "", cf.CP_STR, "ibmmq.otelOverrideCType", "prometheus", "overrideCType", "Override default data types to give mixture of Counters and Gauges")
+	cf.AddParm(&config.overrideCType, "", cf.CP_STR, "ibmmq.overrideCType", "prometheus", "overrideCType", "Override default data types to give mixture of Counters and Gauges")
 
 	err = cf.ParseParms()
 
@@ -102,7 +103,7 @@ func initConfig() error {
 
 			err = cf.ReadConfigFile(config.cf.ConfigFile, &cfy)
 			if err == nil {
-				cf.CopyYamlConfig(&config.cf, cfy.Global, cfy.Connection, cfy.Objects, cfy.Filters)
+				err = cf.CopyYamlConfig(&config.cf, cfy.Global, cfy.Connection, cfy.Objects, cfy.Filters)
 				config.httpListenPort = cf.CopyParmIfNotSetStr("prometheus", "port", cfy.Prometheus.Port)
 				config.httpListenHost = cf.CopyParmIfNotSetStr("prometheus", "host", cfy.Prometheus.Host)
 				config.httpMetricPath = cf.CopyParmIfNotSetStr("prometheus", "MetricsPath", cfy.Prometheus.MetricsPath)
@@ -136,8 +137,14 @@ func initConfig() error {
 	}
 
 	if err == nil {
-		// This preserves a degree of compatibility with the mq_prometheus collector in this repo and any dashboards.
-		config.overrideCTypeBool = cf.AsBool(config.overrideCType, false)
+		// Default value of overrideCType changes to true in this version. This is a breaking change and needs a new major number for the repo.
+		config.overrideCTypeBool = cf.AsBool(config.overrideCType, true)
+
+		// But we don't need to keep backwards compatibility for the Events Statistics collection model
+		if config.cf.CC.UseStatistics && !config.overrideCTypeBool {
+			log.Warn("Using Statistics Events: Forcing overrideCType to true")
+			config.overrideCTypeBool = true
+		}
 	}
 
 	if err == nil {
@@ -162,8 +169,8 @@ func initConfig() error {
 	}
 
 	if err == nil && config.cf.CC.UseResetQStats {
-		fmt.Println("Warning: Data from 'RESET QSTATS' has been requested.")
-		fmt.Println("Ensure no other monitoring applications are also using that command.")
+		log.Warn("Warning: Data from 'RESET QSTATS' has been requested.")
+		log.Warn("Ensure no other monitoring applications are also using that command.")
 	}
 
 	return err

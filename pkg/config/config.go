@@ -1,7 +1,7 @@
 package config
 
 /*
-  Copyright (c) IBM Corporation 2016, 2023
+  Copyright (c) IBM Corporation 2016, 2026
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
@@ -53,6 +53,8 @@ type Config struct {
 	MonitoredChannelsFile      string
 	MonitoredAMQPChannels      string
 	MonitoredAMQPChannelsFile  string
+	MonitoredMQTTChannels      string
+	MonitoredMQTTChannelsFile  string
 	MonitoredTopics            string
 	MonitoredTopicsFile        string
 	MonitoredSubscriptions     string
@@ -107,8 +109,21 @@ const (
 	CP_BOOL = 2
 )
 
+/*
+This array needs to match the OT_ definitions, but with the strings
+matching the keys used for configuration attributes. So "queues" rather than "queue".
+Not all of the object types are actually needed or used during configuration
+*/
+var otString map[string]int
+
+var filters [mqmetric.OT_LAST_USED + 1]struct {
+	include string
+	exclude string
+}
+
 var configParms map[string]*ConfigParm
 var keys []string
+var deprecatedBool bool
 
 func envVarKey(section string, name string) string {
 	return strings.ToUpper("IBMMQ_" + section + "_" + name)
@@ -131,6 +146,7 @@ func AddParm(loc interface{}, defaultValue interface{}, parmType int, cliName st
 
 func InitConfig(cm *Config) {
 	configParms = make(map[string]*ConfigParm)
+	otString = make(map[string]int)
 
 	// Setup a slightly non-default error handler that gets called if there are problems parsing the command line parms
 	flag.Usage = func() {
@@ -156,6 +172,26 @@ func InitConfig(cm *Config) {
 		fmt.Fprintf(o, "\n")
 	}
 
+	// These strings are used to parse the metric filter include/exclude sections and then populate the
+	// maps used at runtime which are indexed by mqmetric.OT_* values. Not all of the OT values need to be
+	// listed here as some are not monitorable or configurable (eg MQOT_PUB)
+	otString["qmgr"] = mqmetric.OT_Q_MGR
+	otString["queues"] = mqmetric.OT_Q
+	otString["channels"] = mqmetric.OT_CHANNEL
+	otString["topics"] = mqmetric.OT_TOPIC
+
+	otString["subscriptions"] = mqmetric.OT_SUB
+	otString["amqpChannels"] = mqmetric.OT_CHANNEL_AMQP
+	otString["mqttChannels"] = mqmetric.OT_CHANNEL_MQTT
+
+	otString["bufferpools"] = mqmetric.OT_BP
+	otString["pagesets"] = mqmetric.OT_PS
+
+	for i := 1; i <= mqmetric.OT_LAST_USED; i++ {
+		cm.CC.MetricFilter[i].Include = make(map[string]struct{})
+		cm.CC.MetricFilter[i].Exclude = make(map[string]struct{})
+	}
+
 	// Setup the CLI flags and the equivalent Environment variable names. The env vars are named
 	// after the YAML model, so they are slightly different than the CLI flag names.
 	//
@@ -170,6 +206,8 @@ func InitConfig(cm *Config) {
 	AddParm(&cm.ReplyQ2, "", CP_STR, "ibmmq.replyQueue2", "connection", "replyQueue2", "Reply Queue to collect other data ")
 	AddParm(&cm.CC.DurableSubPrefix, "", CP_STR, "ibmmq.durableSubPrefix", "connection", "durableSubPrefix", "Collector identifier when using Durable Subscriptions")
 
+	AddParm(&cm.CC.StatisticsQ, "SYSTEM.ADMIN.STATISTICS.QUEUE", CP_STR, "ibmmq.statisticsQueue", "connection", "statisticsQueue", "Queue holding statistics data")
+
 	AddParm(&cm.CC.WaitInterval, defaultWaitInterval, CP_INT, "ibmmq.waitInterval", "connection", "waitInterval", "Maximum wait time for queue manager responses")
 
 	AddParm(&cm.MetaPrefix, "", CP_STR, "metaPrefix", "global", "metaPrefix", "Override path to monitoring resource topic")
@@ -178,10 +216,12 @@ func InitConfig(cm *Config) {
 	AddParm(&cm.MonitoredQueues, "", CP_STR, "ibmmq.monitoredQueues", "objects", "queues", "Patterns of queues to monitor")
 	AddParm(&cm.MonitoredChannels, "", CP_STR, "ibmmq.monitoredChannels", "objects", "channels", "Patterns of channels to monitor")
 	AddParm(&cm.MonitoredAMQPChannels, "", CP_STR, "ibmmq.monitoredAMQPChannels", "objects", "amqpChannels", "Patterns of AMQP channels to monitor")
+	AddParm(&cm.MonitoredMQTTChannels, "", CP_STR, "ibmmq.monitoredMQTTChannels", "objects", "mqttChannels", "Patterns of MQTT channels to monitor")
 
 	AddParm(&cm.MonitoredQueuesFile, "", CP_STR, "ibmmq.monitoredQueuesFile", "objects", "queuesFile", "File with patterns of queues to monitor")
 	AddParm(&cm.MonitoredChannelsFile, "", CP_STR, "ibmmq.monitoredChannelsFile", "objects", "channelsFile", "File with patterns of channels to monitor")
 	AddParm(&cm.MonitoredAMQPChannelsFile, "", CP_STR, "ibmmq.monitoredAMQPChannelsFile", "objects", "amqpChannelsFile", "File with patterns of AMQP channels to monitor")
+	AddParm(&cm.MonitoredMQTTChannelsFile, "", CP_STR, "ibmmq.monitoredMQTTChannelsFile", "objects", "mqttChannelsFile", "File with patterns of MQTT channels to monitor")
 
 	AddParm(&cm.MonitoredTopics, "#", CP_STR, "ibmmq.monitoredTopics", "objects", "topics", "Patterns of topics to monitor")
 	AddParm(&cm.MonitoredSubscriptions, "*", CP_STR, "ibmmq.monitoredSubscriptions", "objects", "subscriptions", "Patterns of subscriptions to monitor")
@@ -189,15 +229,18 @@ func InitConfig(cm *Config) {
 	AddParm(&cm.MonitoredSubscriptionsFile, "", CP_STR, "ibmmq.monitoredSubscriptionsFile", "objects", "subscriptionsFile", "File with patterns of subscriptions to monitor")
 	AddParm(&cm.QueueSubscriptionSelector, "", CP_STR, "ibmmq.queueSubscriptionSelector", "filters", "queueSubscriptionSelector", "Resource topic selection for queues")
 	AddParm(&cm.CC.ShowInactiveChannels, false, CP_BOOL, "ibmmq.showInactiveChannels", "filters", "showInactiveChannels", "Show inactive channels (not just stopped ones)")
+	AddParm(&cm.CC.ShowCustomAttribute, false, CP_BOOL, "ibmmq.showCustomAttribute", "filters", "showCustomAttribute", "Include custom attribute in metrics")
 
 	AddParm(&cm.CC.HideSvrConnJobname, false, CP_BOOL, "ibmmq.hideSvrConnJobname", "filters", "hideSvrConnJobname", "Don't create multiple instances of SVRCONN information")
 	AddParm(&cm.CC.HideAMQPClientId, false, CP_BOOL, "ibmmq.hideAMQPClientId", "filters", "hideAMQPClientId", "Don't create multiple instances of ClientID information")
+	AddParm(&cm.CC.HideMQTTClientId, false, CP_BOOL, "ibmmq.hideMQTTClientId", "filters", "hideMQTTClientId", "Don't create multiple instances of ClientID information")
 
 	// qStatus was the original flag but prefer to use useStatus as more meaningful for all object types
-	AddParm(&cm.CC.UseStatus, false, CP_BOOL, "ibmmq.qStatus", "global", "useObjectStatus", "Add metrics from the QSTATUS fields")
-	AddParm(&cm.CC.UseStatus, false, CP_BOOL, "ibmmq.useStatus", "global", "useObjectStatus", "Add metrics from all object STATUS fields")
+	AddParm(&deprecatedBool, false, CP_BOOL, "ibmmq.qStatus", "global", "useObjectStatus", "Add metrics from the QSTATUS fields")
+	AddParm(&deprecatedBool, false, CP_BOOL, "ibmmq.useStatus", "global", "useObjectStatus", "Add metrics from all object STATUS fields")
 	AddParm(&cm.CC.UsePublications, true, CP_BOOL, "ibmmq.usePublications", "global", "usePublications", "Use resource publications. Set to false to monitor older Distributed platforms")
 	AddParm(&cm.CC.UseResetQStats, false, CP_BOOL, "ibmmq.resetQStats", "global", "useResetQStats", "Use RESET QSTATS on z/OS queue managers")
+	AddParm(&cm.CC.UseStatistics, false, CP_BOOL, "ibmmq.useStatistics", "global", "useStatistics", "Use STATISTICS messages instead of publications on Distributed platforms")
 
 	AddParm(&cm.CC.UserId, "", CP_STR, "ibmmq.userid", "connection", "user", "UserId for MQ connection")
 	// If password is not given on command line (and it shouldn't be) then there's a prompt for stdin
@@ -222,6 +265,11 @@ func InitConfig(cm *Config) {
 
 	AddParm(&cm.metadataTags, "", CP_STR, "ibmmq.metadataTags", "connection", "metadataTags", "Additional Tags")
 	AddParm(&cm.metadataValues, "", CP_STR, "ibmmq.metadataValues", "connection", "metadataValues", "Additional Values (one per tag)")
+
+	for ot, idx := range otString {
+		AddParm(&filters[idx].include, "", CP_STR, "includeMetric."+ot, "filters", "Include_"+ot, "Metric inclusion list for "+ot)
+		AddParm(&filters[idx].exclude, "", CP_STR, "excludeMetric."+ot, "filters", "Exclude_"+ot, "Metric exclusion list for "+ot)
+	}
 
 }
 
@@ -287,6 +335,13 @@ func ParseParms() error {
 		}
 	}
 
+	// These items are no longer used
+	for _, s := range []string{"ibmmq.qStatus", "ibmmq.useStatus"} {
+		if cliSet(s) {
+			fmt.Fprintf(flag.CommandLine.Output(), "WARNING: %s is a deprecated command line option\n", s)
+		}
+	}
+
 	if len(flag.Args()) > 0 {
 		err = fmt.Errorf("Unexpected additional command line parameters given.")
 		fmt.Fprintf(flag.CommandLine.Output(), "%v\n\n", err)
@@ -322,12 +377,30 @@ func VerifyConfig(cm *Config, fullCf interface{}) error {
 		"NONE":      true,
 	}
 
+	// Always force the use of object status queries which is no longer
+	// a configurable attribute. Just in case, we do allow someone to really force
+	// the value via environment variable instead of YAML attribute.
+	if err == nil {
+		cm.CC.UseStatus = true
+		if os.Getenv("MQIGO_FORCE_USESTATUS_FALSE") != "" {
+			cm.CC.UseStatus = false
+		}
+	}
+
 	// If someone has explicitly said not to use publications, then they
 	// must require use of the xxSTATUS commands. So override that flag even if they
 	// have set UseStatus to false on the command line.
+	// An undocumented environment variable allows us to override that behaviour just in case
+	// we want to test some stuff.
 	if err == nil {
 		if !cm.CC.UsePublications {
-			cm.CC.UseStatus = true
+			log.Debugf("VerifyConfig: UseStatus = %v", cm.CC.UseStatus)
+			if os.Getenv("MQIGO_NOFORCE_USESTATUS") == "" {
+				cm.CC.UseStatus = true
+				log.Debugf("VerifyConfig: UsePublications is false, so forcing UseStatus to true")
+			} else {
+				log.Debugf("VerifyConfig: UsePublications is false, but leaving UseStatus as-is")
+			}
 		}
 	}
 
@@ -335,7 +408,18 @@ func VerifyConfig(cm *Config, fullCf interface{}) error {
 	// but it is based on the same cycle so force that option here
 	if err == nil {
 		if cm.CC.UseResetQStats {
-			cm.CC.UseStatus = true
+			if !cm.CC.UseStatus {
+				log.Debugf("VerifyConfig: UseResetStats is true, so forcing UseStatus to true")
+				cm.CC.UseStatus = true
+			}
+		}
+	}
+
+	if err == nil {
+		if cm.CC.UseStatistics {
+			if cm.CC.StatisticsQ == "" {
+				cm.CC.StatisticsQ = "SYSTEM.ADMIN.STATISTICS.QUEUE"
+			}
 		}
 	}
 
@@ -362,6 +446,15 @@ func VerifyConfig(cm *Config, fullCf interface{}) error {
 			cm.MonitoredAMQPChannels, err = mqmetric.ReadPatterns(cm.MonitoredAMQPChannelsFile)
 			if err != nil {
 				err = fmt.Errorf("Failed to parse monitored AMQP channels file - %v", err)
+			}
+		}
+	}
+
+	if err == nil {
+		if cm.MonitoredMQTTChannelsFile != "" {
+			cm.MonitoredMQTTChannels, err = mqmetric.ReadPatterns(cm.MonitoredMQTTChannelsFile)
+			if err != nil {
+				err = fmt.Errorf("Failed to parse monitored MQTT channels file - %v", err)
 			}
 		}
 	}
@@ -464,7 +557,49 @@ func VerifyConfig(cm *Config, fullCf interface{}) error {
 		}
 	}
 
-	log.Debugf("VerifyConfig Config: %+v", fullCf)
+	// Populate the connection info filter maps by splitting any comma-separated string
+	// and then adding each entry for the given object type
+	var emptyStruc struct{}
+	if err == nil {
+		for _, idx := range otString {
+			s := filters[idx].include
+			s = strings.ReplaceAll(s, " ", "")
+			if s != "" {
+				arr := strings.Split(s, ",")
+				if len(arr) != 0 {
+					for i := range arr {
+						cm.CC.MetricFilter[idx].Include[arr[i]] = emptyStruc
+					}
+				}
+			}
+		}
+		for _, idx := range otString {
+			s := filters[idx].exclude
+			s = strings.ReplaceAll(s, " ", "")
+
+			if s != "" {
+				arr := strings.Split(s, ",")
+				if len(arr) != 0 {
+					for i := range arr {
+						cm.CC.MetricFilter[idx].Exclude[arr[i]] = emptyStruc
+					}
+				}
+			}
+		}
+	}
+
+	// When using statistics event messages, we can discover the queues later. And we also want to make sure we've got
+	// all the relevant attributes. So we force the monitoredQueues list to "*"
+	if err == nil {
+		if cm.CC.UseStatistics {
+			tmp := cm.MonitoredQueues
+			cm.MonitoredQueues = "*"
+			log.Debugf("Collecting statistics. MonitoredQueues configured value: %s Now set to %s", tmp, cm.MonitoredQueues)
+		}
+	}
+
+	log.Debugf("VerifyConfig Loaded Config: %+v", fullCf)
+	log.Debugf("VerifyConfig Active Config: %+v", cm)
 	if err != nil {
 		log.Debugf("VerifyConfig Error : %+v", err)
 	}

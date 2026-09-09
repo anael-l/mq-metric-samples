@@ -14,7 +14,7 @@ package ibmmq
 * for each value; those can be found in other header files such as
 * cmqc.h.
 ****************************************************************
-* Copyright (c) IBM Corporation 1993, 2025
+* Copyright (c) IBM Corporation 1993, 2026
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -367,6 +367,18 @@ func MQItoString(class string, value int) string {
 			s = "MQAT_MCAST_PUBLISH"
 		case 37:
 			s = "MQAT_AMQP"
+		default:
+			s = ""
+		}
+
+	case "AUSC":
+		switch v {
+		case 0:
+			s = "MQAUSC_FAILURES"
+		case 1:
+			s = "MQAUSC_ALLCONNS"
+		case 2:
+			s = "MQAUSC_ALLCHECKS"
 		default:
 			s = ""
 		}
@@ -1469,6 +1481,14 @@ func MQItoString(class string, value int) string {
 			s = "MQCMDL_LEVEL_941"
 		case 942:
 			s = "MQCMDL_LEVEL_942"
+		case 943:
+			s = "MQCMDL_LEVEL_943"
+		case 944:
+			s = "MQCMDL_LEVEL_944"
+		case 945:
+			s = "MQCMDL_LEVEL_945"
+		case 1000:
+			s = "MQCMDL_LEVEL_1000"
 		default:
 			s = ""
 		}
@@ -1985,6 +2005,14 @@ func MQItoString(class string, value int) string {
 			s = ""
 		}
 
+	case "ERO":
+		switch v {
+		case 0:
+			s = "MQERO_NONE"
+		default:
+			s = ""
+		}
+
 	case "ET":
 		switch v {
 		case 1:
@@ -2419,6 +2447,8 @@ func MQItoString(class string, value int) string {
 			s = "MQIAMO_MONITOR_DELTA"
 		case 3:
 			s = "MQIAMO_MONITOR_LSN"
+		case 4:
+			s = "MQIAMO_MONITOR_TIMESTAMP"
 		case 100:
 			s = "MQIAMO_MONITOR_HUNDREDTHS"
 		case 1024:
@@ -3213,6 +3243,8 @@ func MQItoString(class string, value int) string {
 			s = "MQNHASTATUS_DISCONNECTED"
 		case 7:
 			s = "MQNHASTATUS_PARTITIONED"
+		case 8:
+			s = "MQNHASTATUS_SYNC_FAILED"
 		default:
 			s = ""
 		}
@@ -3405,6 +3437,36 @@ func MQItoString(class string, value int) string {
 			s = "MQOP_SUSPEND"
 		case 131072:
 			s = "MQOP_RESUME"
+		default:
+			s = ""
+		}
+
+	case "OTEL_PCTL":
+		switch v {
+		case 0:
+			s = "MQOTEL_PCTL_QMGR"
+		case 1:
+			s = "MQOTEL_PCTL_MANUAL"
+		case 2:
+			s = "MQOTEL_PCTL_AUTO"
+		case 3:
+			s = "MQOTEL_PCTL_AS_PARENT"
+		default:
+			s = ""
+		}
+
+	case "OTEL_TRACE":
+		switch v {
+		case 0:
+			s = "MQOTEL_TRACE_QMGR"
+		case 1:
+			s = "MQOTEL_TRACE_OFF"
+		case 2:
+			s = "MQOTEL_TRACE_ON"
+		case 3:
+			s = "MQOTEL_TRACE_NONE"
+		case 4:
+			s = "MQOTEL_TRACE_AS_PARENT"
 		default:
 			s = ""
 		}
@@ -3931,12 +3993,36 @@ func MQItoString(class string, value int) string {
 			s = ""
 		}
 
+	case "QSR":
+		switch v {
+		case 0:
+			s = "MQQSR_OPTIONAL"
+		case 1:
+			s = "MQQSR_REQUIRED"
+		default:
+			s = ""
+		}
+
 	case "QSUM":
 		switch v {
 		case 0:
 			s = "MQQSUM_NO"
 		case 1:
 			s = "MQQSUM_YES"
+		default:
+			s = ""
+		}
+
+	case "QS":
+		switch v {
+		case -1:
+			s = "MQQS_UNKNOWN"
+		case 0:
+			s = "MQQS_UNPROTECTED"
+		case 1:
+			s = "MQQS_HYBMLKEM"
+		case 2:
+			s = "MQQS_MLKEM"
 		default:
 			s = ""
 		}
@@ -4303,6 +4389,14 @@ func MQItoString(class string, value int) string {
 			s = "MQRQ_STANDBY_ACTIVATED"
 		case 33:
 			s = "MQRQ_REPLICA_ACTIVATED"
+		case 65:
+			s = "MQRQ_CONN_AUTHORIZED"
+		case 66:
+			s = "MQRQ_OPEN_AUTHORIZED"
+		case 67:
+			s = "MQRQ_SUB_AUTHORIZED"
+		case 68:
+			s = "MQRQ_SUB_DEST_AUTHORIZED"
 		default:
 			s = ""
 		}

@@ -67,9 +67,15 @@ var (
 	meter         metricotel.Meter
 
 	metricReader metricsdk.Reader
+
+	unittestLoops    = 0
+	unittestMaxLoops = 0
 )
 
-func main() {
+// Have a separate "real" main so that deferred functions run before the exit()
+func main() { os.Exit(mainReturnWithCode()) }
+
+func mainReturnWithCode() int {
 	var err error
 	var d time.Duration
 
@@ -87,9 +93,15 @@ func main() {
 	/*
 		if err == nil && config.cf.QMgrName == "" {
 			log.Errorln("Must provide a queue manager name to connect to.")
-			os.Exit(72)
+			return 72
 		}
 	*/
+
+	// This env var is purely for internal testing purposes
+	utEnv := "MQIGO_UNITTEST_MAX_LOOPS"
+	if os.Getenv(utEnv) != "" {
+		unittestMaxLoops, _ = strconv.Atoi(os.Getenv(utEnv))
+	}
 
 	// OTel libraries use the stdr logger. Let's try to make it match the loglevel
 	// of this MQ package.
@@ -115,7 +127,7 @@ func main() {
 		d, err = time.ParseDuration(config.ci.Interval)
 		if err != nil || d.Seconds() <= 1 {
 			log.Errorln("Invalid or too short value for interval parameter: ", err)
-			os.Exit(1)
+			return 1
 		}
 
 		// Connect and open standard queues
@@ -140,7 +152,7 @@ func main() {
 			mqcc := mqe.MQReturn.MQCC
 			if mqrc == ibmmq.MQRC_STANDBY_Q_MGR {
 				log.Errorln(err)
-				os.Exit(30) // This is the same as the strmqm return code for "active instance running elsewhere"
+				return 30 // This is the same as the strmqm return code for "active instance running elsewhere"
 			} else if mqcc == ibmmq.MQCC_WARNING {
 				log.Infoln("Connected to queue manager ", config.cf.QMgrName)
 				// Report the error but allow it to continue
@@ -221,14 +233,6 @@ func main() {
 
 	if err == nil {
 
-		// For debug purposes, we may want to end the collector after a short time
-		loopCount := 0
-		maxLoops := 0
-		ml := os.Getenv("OTEL_MAXLOOPS")
-		if ml != "" {
-			maxLoops, _ = strconv.Atoi(ml)
-		}
-
 		for {
 			rm := metricdata.ResourceMetrics{}
 			// deepDebug("Initial rm: %+v", rm)
@@ -241,6 +245,16 @@ func main() {
 					// We should now have everything available in a structure. So push it to the collector
 					// deepDebug("About to write rm: %+v", rm)
 					err = exporter.Export(ctx, &rm)
+				}
+			}
+
+			// Break out after a small number of iterations when we are testing
+			// log.Debugf("Max loops: %d Cur loops: %d", unittestMaxLoops, unittestLoops)
+			if unittestMaxLoops != 0 {
+				unittestLoops++
+				if unittestLoops > unittestMaxLoops {
+					log.Infof("Exiting: Maximum unittest iterations of %d reached", unittestMaxLoops)
+					break
 				}
 			}
 
@@ -259,11 +273,6 @@ func main() {
 				log.Fatalf("Exiting: %v", ctx.Err())
 			}
 
-			loopCount++
-			if maxLoops > 0 && loopCount > maxLoops {
-				log.Fatalf("Exiting after %d proper collection loop(s)", maxLoops)
-			}
-
 			time.Sleep(d)
 		}
 
@@ -273,22 +282,29 @@ func main() {
 		log.Fatal(err)
 	}
 
-	os.Exit(0)
+	return 0
 }
 
 func newExporter() (metricsdk.Exporter, error) {
 	endpoint := config.ci.Endpoint
 	insecure := cf.AsBool(config.ci.Insecure, false)
-	// Returns an exporter for a couple of known exporter types.
-	// - Stdout is the default (endpoint is not defined)
+
+	// Returns an exporter for a few known exporter types.
+	// - Stdout is the default exporter (endpoint is empty or "stdout")
+	//   Can also set to "stderr"
+	//   Output is written as compact JSON. Can redirect stdout to a file for jq examination
 	// - OTLP/GRPC is an alternative when you define an endpoint
 	//   endpoint is a simple hostname:port string
-	// - OTEL/HTTP can be used if you set the endpoint to start with the protocol
+	// - OTLP/HTTP can be used if you set the endpoint to start with the protocol
 	//   endpoint is http[s]://hostname:port
 	// Additional config options for TLS could be provided for the GRPC protocol, but
 	// they can also come via OTEL-defined env vars
-	if endpoint == "" {
-		return exportStdout.New()
+	if endpoint == "" || strings.ToLower(endpoint) == "stdout" || strings.ToLower(endpoint) == "stderr" {
+		w := os.Stdout
+		if strings.ToLower(endpoint) == "stderr" {
+			w = os.Stderr
+		}
+		return exportStdout.New(exportStdout.WithWriter(w) /*, *exportStdout.WithPrettyPrint()*/)
 	} else if strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://") {
 		opts := []exportHttp.Option{
 			exportHttp.WithEndpointURL(endpoint),
