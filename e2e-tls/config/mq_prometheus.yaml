@@ -1,0 +1,46 @@
+# Exporter configuration for the TLS end-to-end test.
+# Connection details come from the CCDT; the keystore location comes from the
+# MQSSLKEYR environment variable set in docker-compose.yaml.
+global:
+    useResetQStats: false
+    usePublications: true
+    useStatistics: false
+    logLevel: INFO
+    pollInterval: 10s
+    rediscoverInterval: 1h
+    tzOffset: 0h
+
+connection:
+    queueManager: QM1
+    ccdtUrl: file:///opt/config/ccdt.json
+    # No user/password on purpose: the client certificate is the credential and
+    # the CHLAUTH SSLPEERMAP rule on the queue manager maps it to "mqmon".
+    replyQueue: SYSTEM.DEFAULT.MODEL.QUEUE
+    waitInterval: 3
+    metadataMap:
+      ENV: e2e-tls
+
+objects:
+    queues:
+        - MON.*
+        - DEV.*
+    channels:
+        - MON.*
+        - DEV.*
+    topics:
+    subscriptions:
+
+filters:
+    hideSvrConnJobname: false
+    showInactiveChannels: false
+    queueSubscriptionSelector:
+        - PUT
+        - GET
+        - GENERAL
+
+prometheus:
+    port: 9157
+    metricsPath: "/metrics"
+    namespace: ibmmq
+    keepRunning: true
+    reconnectInterval: 5s

@@ -1,0 +1,43 @@
+* Objects for the mq-metric-samples TLS end-to-end test.
+* Runs after the developer defaults (10-dev.mqsc) and the TLS setup (15/20-*.mqsc).
+
+* A queue to put test messages on
+DEFINE QLOCAL('MON.TEST.QUEUE') MAXDEPTH(5000) REPLACE
+
+* Dedicated SVRCONN for the monitor. The client MUST present a certificate.
+* MCAUSER is set to a blocked id so that the only way in is through the
+* CHLAUTH mapping below.
+DEFINE CHANNEL('MON.SVRCONN') CHLTYPE(SVRCONN) TRPTYPE(TCP) +
+       SSLCIPH(ANY_TLS12_OR_HIGHER) SSLCAUTH(REQUIRED) MCAUSER('nobody') REPLACE
+
+* Map the monitor's certificate DN to the mqmon identity. SSLPEERMAP rules
+* take precedence over the developer config's ADDRESSMAP back-stop rule.
+SET CHLAUTH('MON.SVRCONN') TYPE(SSLPEERMAP) SSLPEER('CN=mqmon,O=e2e') +
+    USERSRC(MAP) MCAUSER('mqmon') CHCKCLNT(ASQMGR) +
+    DESCR('Monitor client certificate -> mqmon') ACTION(REPLACE)
+
+* Anything else arriving on this channel is refused.
+SET CHLAUTH('MON.SVRCONN') TYPE(ADDRESSMAP) ADDRESS('*') USERSRC(NOACCESS) +
+    DESCR('Block unmapped connections on MON.SVRCONN') ACTION(REPLACE)
+
+* Minimum authorities for the collector (read-only monitoring).
+* The container image sets MQS_PERMIT_UNKNOWN_ID so mqmon needs no OS account.
+SET AUTHREC PRINCIPAL('mqmon') OBJTYPE(QMGR) AUTHADD(CONNECT,INQ,DSP)
+* PCF commands are sent to the command queue
+SET AUTHREC PROFILE('SYSTEM.ADMIN.COMMAND.QUEUE') PRINCIPAL('mqmon') OBJTYPE(QUEUE) AUTHADD(PUT)
+* Replies and publications arrive on dynamic queues built from the model queue
+SET AUTHREC PROFILE('SYSTEM.DEFAULT.MODEL.QUEUE') PRINCIPAL('mqmon') OBJTYPE(QUEUE) AUTHADD(GET,INQ,DSP)
+SET AUTHREC PROFILE('AMQ.**') PRINCIPAL('mqmon') OBJTYPE(QUEUE) AUTHADD(GET,INQ,DSP)
+* Resource metrics are published under $SYS/MQ (SYSTEM.ADMIN.TOPIC)
+SET AUTHREC PROFILE('SYSTEM.ADMIN.TOPIC') PRINCIPAL('mqmon') OBJTYPE(TOPIC) AUTHADD(SUB)
+* DISPLAY xxSTATUS needs DSP on the objects being displayed
+SET AUTHREC PROFILE('**') PRINCIPAL('mqmon') OBJTYPE(QUEUE)   AUTHADD(DSP,INQ)
+SET AUTHREC PROFILE('**') PRINCIPAL('mqmon') OBJTYPE(CHANNEL) AUTHADD(DSP)
+SET AUTHREC PROFILE('**') PRINCIPAL('mqmon') OBJTYPE(TOPIC)   AUTHADD(DSP)
+SET AUTHREC PROFILE('**') PRINCIPAL('mqmon') OBJTYPE(CLNTCONN) AUTHADD(DSP)
+SET AUTHREC PROFILE('**') PRINCIPAL('mqmon') OBJTYPE(LISTENER) AUTHADD(DSP)
+SET AUTHREC PROFILE('**') PRINCIPAL('mqmon') OBJTYPE(SERVICE)  AUTHADD(DSP)
+
+* Log authority failures as events too, handy when tightening the list above
+ALTER QMGR AUTHOREV(ENABLED)
+REFRESH SECURITY(*)

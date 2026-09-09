@@ -1,0 +1,21 @@
+{
+  "channel": [
+    {
+      "name": "MON.SVRCONN",
+      "type": "clientConnection",
+      "clientConnection": {
+        "connection": [
+          {
+            "host": "qm1",
+            "port": 1414
+          }
+        ],
+        "queueManager": "QM1"
+      },
+      "transmissionSecurity": {
+        "cipherSpecification": "ANY_TLS12_OR_HIGHER",
+        "certificateLabel": "mqmon"
+      }
+    }
+  ]
+}
