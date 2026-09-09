@@ -12,8 +12,8 @@ cd "$(dirname "$0")"
 
 QM=mq-e2e-qm1
 EXP=mq-e2e-exporter
-IMAGE="${EXPORTER_IMAGE:-ghcr.io/anael-l/mq-metric-samples:master}"
-OTEL_IMAGE="${OTEL_IMAGE:-ghcr.io/anael-l/mq-metric-samples:master-otel}"
+IMAGE="${EXPORTER_IMAGE:-ghcr.io/anael-l/mq-metric-prometheus:master}"
+OTEL_IMAGE="${OTEL_IMAGE:-ghcr.io/anael-l/mq-metric-otel:master}"
 METRICS=http://localhost:9157/metrics
 NMSG=7
 KDB_PW="${KDB_PW:-passw0rd}"

@@ -25,7 +25,7 @@ docker compose down -v
 ```
 
 `EXPORTER_IMAGE=...` overrides the Prometheus exporter image for verify.sh and
-compose; `OTEL_IMAGE=...` the OTel image run by verify.sh (`...:master-otel`);
+compose; `OTEL_IMAGE=...` the OTel image run by verify.sh (`ghcr.io/anael-l/mq-metric-otel:master`);
 `MQ_IMAGE=...` the queue manager image for gen-certs.sh and compose, e.g.
 `MQ_IMAGE=icr.io/ibm-messaging/mq:9.4.5.1-r1 ./verify.sh --fresh` to test
 against an MQ 9.4 queue manager.
