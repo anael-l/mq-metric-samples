@@ -1,4 +1,4 @@
-# TLS end-to-end test: mq_prometheus against a containerised queue manager
+# TLS end-to-end test: mq_prometheus and mq_otel against a containerised queue manager
 
 Two containers, one network, no passwords: the exporter authenticates to the
 queue manager with a client certificate only.
@@ -10,8 +10,8 @@ gen-certs.sh                      docker compose                    verify.sh
    |   CA, QM1 cert, mqmon cert        |   PEM -> /etc/mqm/pki/...       | scrape :9157
    | runmqakm (MQ server image)        |   30-monitor.mqsc               | DIS CHSTATUS
    |   key.kdb (+ CA-only kdb)         | exporter: ghcr.io/anael-l/...   | negative test
-   v                                   |   CCDT + MQSSLKEYR              v
-  pki/                                 v
+   v                                   |   CCDT + MQSSLKEYR              | otel image (stdout)
+  pki/                                 v                                 v
 ```
 
 ## Run
@@ -23,8 +23,11 @@ docker compose up -d
 docker compose down -v
 ```
 
-`EXPORTER_IMAGE=...` overrides the exporter image for verify.sh and compose;
-`MQ_IMAGE=...` overrides the queue manager image for gen-certs.sh and compose.
+`EXPORTER_IMAGE=...` overrides the Prometheus exporter image for verify.sh and
+compose; `OTEL_IMAGE=...` the OTel image run by verify.sh (`...:master-otel`);
+`MQ_IMAGE=...` the queue manager image for gen-certs.sh and compose, e.g.
+`MQ_IMAGE=icr.io/ibm-messaging/mq:9.4.5.1-r1 ./verify.sh --fresh` to test
+against an MQ 9.4 queue manager.
 
 ## How the pieces fit
 
@@ -42,6 +45,10 @@ docker compose down -v
   The keystore is mounted and named by `MQSSLKEYR` (path without `.kdb`).
   No `user`/`password` is configured. The container runs as uid 1001 with no
   passwd entry, as OpenShift would run it.
+- **OTel collector**: verify.sh also runs the `mq_otel` image once with
+  `config/mq_otel.yaml` (same connection block, empty `otel.endpoint` so the
+  stdout exporter is used, `MQIGO_UNITTEST_MAX_LOOPS=3` so it exits) and
+  checks the JSON it prints for the same queue depth and channel status.
 - **Proof of TLS auth**: `DIS CHSTATUS(MON.SVRCONN)` shows the negotiated
   cipher, `SSLPEER(...CN=mqmon...)` and `MCAUSER(mqmon)`; the `$SYS/MQ`
   subscriptions are owned by `mqmon`; and a second run with a keystore that
@@ -53,3 +60,6 @@ docker compose down -v
   because the containers run as other uids. Test material only.
 - The `metadataMap` entry in the YAML only takes effect with an exporter built
   from a recent upstream commit; older images ignore it.
+- The keystore is built with `runmqakm` from the queue manager image. The
+  exporter image (MQ 10 Redistributable Client) ships `runmqakm` too, but it
+  fails with "Failed to dlopen ICU library".

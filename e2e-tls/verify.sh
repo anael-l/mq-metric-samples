@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end check: the Prometheus exporter connects to the containerised
 # queue manager over mutual TLS, is identified by its certificate, and reports
-# real metrics. Also proves a client WITHOUT a certificate is refused.
+# real metrics. Also proves a client WITHOUT a certificate is refused, and that
+# the OTel collector image connects the same way (stdout exporter).
 #
 # Usage:  ./verify.sh            (expects `docker compose up -d` already done)
 #         ./verify.sh --fresh    (regenerates PKI, recreates the stack first)
@@ -11,6 +12,7 @@ cd "$(dirname "$0")"
 QM=mq-e2e-qm1
 EXP=mq-e2e-exporter
 IMAGE="${EXPORTER_IMAGE:-ghcr.io/anael-l/mq-metric-samples:master}"
+OTEL_IMAGE="${OTEL_IMAGE:-ghcr.io/anael-l/mq-metric-samples:master-otel}"
 METRICS=http://localhost:9157/metrics
 NMSG=7
 fail=0
@@ -101,6 +103,30 @@ else
 fi
 reason=$(docker exec "$QM" sh -c 'grep -h -o -E "AMQ9637|AMQ9660|AMQ9631|AMQ9209" /var/mqm/qmgrs/QM1/errors/AMQERR01.LOG /var/mqm/errors/AMQERR01.LOG 2>/dev/null | sort -u | tr "\n" " "')
 [ -n "$reason" ] && pass "queue manager logged the TLS rejection: $reason" || echo "  (no AMQ96xx entry found in error log; rejection happened client side)"
+
+echo "== 7. OTel collector image: same TLS setup, stdout exporter, 3 collections"
+oout=$(timeout 120 docker run --rm --user 1001:0 --network mq-e2e-tls_default \
+  -e MQSSLKEYR=/opt/config/ssl/key -e IBMMQ_GLOBAL_LOGLEVEL=INFO -e MQIGO_UNITTEST_MAX_LOOPS=3 \
+  -v "$PWD/config/mq_otel.yaml:/opt/config/mq_otel.yaml:ro" \
+  -v "$PWD/config/ccdt.json:/opt/config/ccdt.json:ro" \
+  -v "$PWD/pki/client:/opt/config/ssl:ro" \
+  "$OTEL_IMAGE" 2>&1); orc=$?
+# No "grep -q" on the big otel output: with pipefail the early exit kills echo.
+if [ $orc -eq 0 ] && grep "Connected to queue manager" <<<"$oout" >/dev/null; then
+  pass "otel image connected over TLS and exited cleanly after 3 collections"
+else
+  nope "otel image failed (exit $orc)"; echo "$oout" | grep 'level=' | tail -5
+fi
+# Each collection is one JSON document on stdout (very long lines; docker may
+# wrap them). Join everything after the first document and put one metric per line.
+osplit=$(echo "$oout" | sed -n '/^{"Resource"/,$p' | tr -d '\n' | sed 's/{"Name":/\n{"Name":/g')
+on=$(echo "$osplit" | grep -c '^{"Name":"ibmmq\.')
+[ "$on" -gt 50 ] && pass "$on ibmmq.* metric entries exported" || nope "only $on ibmmq.* metric entries exported"
+odepth=$(echo "$osplit" | grep '^{"Name":"ibmmq.queue.depth"' \
+  | grep -o '"Value":"MON.TEST.QUEUE"}}[^]]*\],"StartTime":"[^"]*","Time":"[^"]*","Value":[0-9]*' | tail -1 | grep -o '[0-9]*$')
+[ "$odepth" = "$NMSG" ] && pass "otel ibmmq.queue.depth{queue=MON.TEST.QUEUE} = $odepth" || nope "otel queue depth is '$odepth', expected $NMSG"
+echo "$osplit" | grep '^{"Name":"ibmmq.channel.status"' | grep '"Value":"MON.SVRCONN"' >/dev/null \
+  && pass "otel ibmmq.channel.status for MON.SVRCONN present" || nope "no otel channel status for MON.SVRCONN"
 
 echo
 if [ $fail -eq 0 ]; then echo "ALL CHECKS PASSED"; else echo "SOME CHECKS FAILED"; fi
