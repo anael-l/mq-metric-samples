@@ -34,8 +34,12 @@ services:
     # already makes /IBM and /.mqm world-writable for this reason.
     user: "1001:0"
     environment:
-      # MQSSLKEYR takes the path without the .kdb suffix
-      MQSSLKEYR: /opt/config/ssl/key
+      # Key repository. Default: the PKCS#12 file, whose password comes from
+      # MQKEYRPWD (that exact name; MQSSLKEYRPWD is silently ignored).
+      # Alternative: MQSSLKEYR=/opt/config/ssl/key selects the CMS kdb, which
+      # has a stash file and needs no password (MQKEYRPWD is then ignored).
+      MQSSLKEYR: ${MQSSLKEYR:-/opt/config/ssl/mqmon.p12}
+      MQKEYRPWD: ${KDB_PW:-passw0rd}
       IBMMQ_GLOBAL_LOGLEVEL: ${LOGLEVEL:-INFO}
     ports:
       - "9157:9157"

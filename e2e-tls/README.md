@@ -8,9 +8,10 @@ gen-certs.sh                      docker compose                    verify.sh
    |                                   |                                 |
    | openssl (alpine/openssl)          | qm1: icr.io/ibm-messaging/mq   | put msgs (amqsput)
    |   CA, QM1 cert, mqmon cert        |   PEM -> /etc/mqm/pki/...       | scrape :9157
-   | runmqakm (MQ server image)        |   30-monitor.mqsc               | DIS CHSTATUS
-   |   key.kdb (+ CA-only kdb)         | exporter: ghcr.io/anael-l/...   | negative test
-   v                                   |   CCDT + MQSSLKEYR              | otel image (stdout)
+   |   mqmon.p12 (key+cert+CA)         |   30-monitor.mqsc               | DIS CHSTATUS
+   | runmqakm (MQ server image)        | exporter: ghcr.io/anael-l/...   | kdb variant
+   |   key.kdb (+ CA-only kdb)         |   CCDT + MQSSLKEYR + MQKEYRPWD  | negative test
+   v                                   |                                 | otel image (stdout)
   pki/                                 v                                 v
 ```
 
@@ -42,9 +43,21 @@ against an MQ 9.4 queue manager.
   - `MON.TEST.QUEUE`
 - **Exporter**: `config/mq_prometheus.yaml` points `ccdtUrl` at
   `config/ccdt.json` (`ANY_TLS12_OR_HIGHER`, `certificateLabel: mqmon`).
-  The keystore is mounted and named by `MQSSLKEYR` (path without `.kdb`).
   No `user`/`password` is configured. The container runs as uid 1001 with no
   passwd entry, as OpenShift would run it.
+- **Key repository**: `gen-certs.sh` packages the same client identity two ways
+  and verify.sh checks both:
+  - `pki/client/mqmon.p12` (default). Plain OpenSSL 3 output, no MQ tooling.
+    `MQSSLKEYR=/opt/config/ssl/mqmon.p12` and the password in `MQKEYRPWD`
+    (exactly that name; `MQSSLKEYRPWD` is ignored). The p12 must contain the
+    CA and its friendly name must equal `certificateLabel`. To keep the
+    password out of the environment, put `SSLKeyRepositoryPassword` in an
+    `mqclient.ini` SSL stanza (`MQCLNTCF=...`); `runmqicred` in the image can
+    encrypt it.
+  - `pki/client/key.kdb` (+ `.sth`). CMS key database built with `runmqakm`;
+    the stash file means no password is needed. Select it with
+    `MQSSLKEYR=/opt/config/ssl/key docker compose up -d` (path without `.kdb`).
+  - PEM files are **not** accepted as a key repository by the MQ 10 C client.
 - **OTel collector**: verify.sh also runs the `mq_otel` image once with
   `config/mq_otel.yaml` (same connection block, empty `otel.endpoint` so the
   stdout exporter is used, `MQIGO_UNITTEST_MAX_LOOPS=3` so it exits) and
@@ -60,6 +73,6 @@ against an MQ 9.4 queue manager.
   because the containers run as other uids. Test material only.
 - The `metadataMap` entry in the YAML only takes effect with an exporter built
   from a recent upstream commit; older images ignore it.
-- The keystore is built with `runmqakm` from the queue manager image. The
-  exporter image (MQ 10 Redistributable Client) ships `runmqakm` too, but it
-  fails with "Failed to dlopen ICU library".
+- The kdb is built with `runmqakm` from the queue manager image. The exporter
+  image (MQ 10 Redistributable Client) ships `runmqakm` too, but it fails with
+  "Failed to dlopen ICU library". The p12 path needs no MQ tooling at all.

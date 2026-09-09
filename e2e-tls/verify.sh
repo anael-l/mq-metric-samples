@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end check: the Prometheus exporter connects to the containerised
-# queue manager over mutual TLS, is identified by its certificate, and reports
+# queue manager over mutual TLS (PKCS#12 key repository by default, the CMS
+# kdb is checked as well), is identified by its certificate, and reports
 # real metrics. Also proves a client WITHOUT a certificate is refused, and that
 # the OTel collector image connects the same way (stdout exporter).
 #
@@ -15,6 +16,7 @@ IMAGE="${EXPORTER_IMAGE:-ghcr.io/anael-l/mq-metric-samples:master}"
 OTEL_IMAGE="${OTEL_IMAGE:-ghcr.io/anael-l/mq-metric-samples:master-otel}"
 METRICS=http://localhost:9157/metrics
 NMSG=7
+KDB_PW="${KDB_PW:-passw0rd}"
 fail=0
 
 pass() { printf '  \033[32mPASS\033[0m %s\n' "$*"; }
@@ -32,11 +34,38 @@ for i in $(seq 1 30); do
   docker logs "$EXP" 2>&1 | grep -q "Connected to queue manager QM1" && break
   sleep 2
 done
+keyr=$(docker inspect "$EXP" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^MQSSLKEYR=//p')
 if docker logs "$EXP" 2>&1 | grep -q "Connected to queue manager QM1"; then
-  pass "exporter log reports connection to QM1"
+  pass "exporter log reports connection to QM1 (MQSSLKEYR=$keyr)"
 else
-  nope "exporter never connected"; docker logs "$EXP" 2>&1 | tail -20
+  nope "exporter never connected (MQSSLKEYR=$keyr)"; docker logs "$EXP" 2>&1 | tail -20
 fi
+
+echo "== 1b. the other key repository format connects too"
+if [ "${keyr##*.}" = "p12" ]; then alt=/opt/config/ssl/key; altpw=; else alt=/opt/config/ssl/mqmon.p12; altpw="$KDB_PW"; fi
+# mq_prometheus only counts collection loops when scraped, so run it detached
+# and watch its log for the connection line rather than waiting for an exit.
+docker rm -f mq-e2e-alt >/dev/null 2>&1
+docker run -d --name mq-e2e-alt --user 1001:0 --network mq-e2e-tls_default \
+  -e MQSSLKEYR="$alt" -e MQKEYRPWD="$altpw" -e IBMMQ_GLOBAL_LOGLEVEL=INFO \
+  -e IBMMQ_PROMETHEUS_KEEPRUNNING=false \
+  -v "$PWD/config/mq_prometheus.yaml:/opt/config/mq_prometheus.yaml:ro" \
+  -v "$PWD/config/ccdt.json:/opt/config/ccdt.json:ro" \
+  -v "$PWD/pki/client:/opt/config/ssl:ro" \
+  "$IMAGE" >/dev/null
+altok=0
+for i in $(seq 1 20); do
+  alog=$(docker logs mq-e2e-alt 2>&1)
+  grep "Connected to queue manager" <<<"$alog" >/dev/null && { altok=1; break; }
+  grep "level=error" <<<"$alog" >/dev/null && break
+  sleep 3
+done
+if [ $altok = 1 ]; then
+  pass "exporter also connects with MQSSLKEYR=$alt"
+else
+  nope "exporter failed with MQSSLKEYR=$alt"; grep 'level=' <<<"$alog" | tail -3
+fi
+docker rm -f mq-e2e-alt >/dev/null 2>&1
 
 echo "== 2. channel status on the queue manager"
 chs=$(mqsc "DIS CHSTATUS(MON.SVRCONN) SSLCIPH SSLPEER MCAUSER STATUS")
@@ -104,9 +133,10 @@ fi
 reason=$(docker exec "$QM" sh -c 'grep -h -o -E "AMQ9637|AMQ9660|AMQ9631|AMQ9209" /var/mqm/qmgrs/QM1/errors/AMQERR01.LOG /var/mqm/errors/AMQERR01.LOG 2>/dev/null | sort -u | tr "\n" " "')
 [ -n "$reason" ] && pass "queue manager logged the TLS rejection: $reason" || echo "  (no AMQ96xx entry found in error log; rejection happened client side)"
 
-echo "== 7. OTel collector image: same TLS setup, stdout exporter, 3 collections"
+echo "== 7. OTel collector image: same TLS setup (p12), stdout exporter, 3 collections"
 oout=$(timeout 120 docker run --rm --user 1001:0 --network mq-e2e-tls_default \
-  -e MQSSLKEYR=/opt/config/ssl/key -e IBMMQ_GLOBAL_LOGLEVEL=INFO -e MQIGO_UNITTEST_MAX_LOOPS=3 \
+  -e MQSSLKEYR=/opt/config/ssl/mqmon.p12 -e MQKEYRPWD="$KDB_PW" \
+  -e IBMMQ_GLOBAL_LOGLEVEL=INFO -e MQIGO_UNITTEST_MAX_LOOPS=3 \
   -v "$PWD/config/mq_otel.yaml:/opt/config/mq_otel.yaml:ro" \
   -v "$PWD/config/ccdt.json:/opt/config/ccdt.json:ro" \
   -v "$PWD/pki/client:/opt/config/ssl:ro" \
