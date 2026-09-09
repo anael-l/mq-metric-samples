@@ -2,7 +2,7 @@ name: mq-e2e-tls
 
 services:
   qm1:
-    image: icr.io/ibm-messaging/mq:latest
+    image: ${MQ_IMAGE:-icr.io/ibm-messaging/mq:latest}
     container_name: mq-e2e-qm1
     hostname: qm1
     environment:
