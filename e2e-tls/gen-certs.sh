@@ -3,7 +3,8 @@
 # certificate, then build the client key database (kdb) the MQ C client needs.
 #
 # Nothing is required on the host except docker: openssl runs in the
-# alpine/openssl image and runmqakm runs in the exporter image (which ships it).
+# alpine/openssl image and runmqakm runs in the MQ server image (the exporter
+# image is built from the Redistributable Client, whose runmqakm cannot load ICU).
 #
 # Output layout (all under ./pki, gitignored):
 #   qm/keys/qm1/{tls.key,tls.crt,ca.crt}   -> /etc/mqm/pki/keys/qm1 in the MQ container
@@ -13,7 +14,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 PKI="$(pwd)/pki"
-EXPORTER_IMAGE="${EXPORTER_IMAGE:-ghcr.io/anael-l/mq-metric-samples:master}"
+MQ_IMAGE="${MQ_IMAGE:-icr.io/ibm-messaging/mq:latest}"
 KDB_PW="${KDB_PW:-passw0rd}"
 UIDGID="$(id -u):$(id -g)"
 
@@ -53,10 +54,10 @@ cp "$PKI/tmp/ca.crt"   "$PKI/qm/trust/0/tls.crt"
 # start-up, so they must be readable by that uid. Test material only.
 chmod 644 "$PKI"/qm/keys/qm1/* "$PKI"/qm/trust/0/*
 
-# ---- Client kdb via runmqakm (inside the exporter image) ----------------------
+# ---- Client kdb via runmqakm (inside the MQ server image) ---------------------
 docker run --rm --user "$UIDGID" -e HOME=/tmp -e KDB_PW="$KDB_PW" \
   -v "$PKI/tmp:/work" -v "$PKI/client:/out" -v "$PKI/client-nocert:/out2" \
-  --entrypoint sh "$EXPORTER_IMAGE" -euc '
+  --entrypoint sh "$MQ_IMAGE" -euc '
   export PATH=$PATH:/opt/mqm/bin
   runmqakm -keydb -create -db /out/key.kdb -pw "$KDB_PW" -type cms -stash
   runmqakm -cert -add    -db /out/key.kdb -stashed -label e2eca -file /work/ca.crt -format ascii -trust enable

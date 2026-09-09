@@ -76,7 +76,7 @@ done
 chok=0
 for i in 1 2 3; do
   m=$(curl -s "$METRICS")
-  echo "$m" | grep -q 'ibmmq_channel_status{channel="MON.SVRCONN"' && { chok=1; break; }
+  echo "$m" | grep -q -E '^ibmmq_channel_status\{[^}]*channel="MON.SVRCONN"' && { chok=1; break; }
   sleep 6
 done
 [ $chok = 1 ] && pass "channel status metric for MON.SVRCONN present" || nope "no channel metric in 3 scrapes"

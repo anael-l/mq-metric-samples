@@ -8,7 +8,7 @@ gen-certs.sh                      docker compose                    verify.sh
    |                                   |                                 |
    | openssl (alpine/openssl)          | qm1: icr.io/ibm-messaging/mq   | put msgs (amqsput)
    |   CA, QM1 cert, mqmon cert        |   PEM -> /etc/mqm/pki/...       | scrape :9157
-   | runmqakm (exporter image)         |   30-monitor.mqsc               | DIS CHSTATUS
+   | runmqakm (MQ server image)        |   30-monitor.mqsc               | DIS CHSTATUS
    |   key.kdb (+ CA-only kdb)         | exporter: ghcr.io/anael-l/...   | negative test
    v                                   |   CCDT + MQSSLKEYR              v
   pki/                                 v
@@ -23,7 +23,8 @@ docker compose up -d
 docker compose down -v
 ```
 
-`EXPORTER_IMAGE=...` overrides the exporter image for both scripts and compose.
+`EXPORTER_IMAGE=...` overrides the exporter image for verify.sh and compose;
+`MQ_IMAGE=...` overrides the queue manager image for gen-certs.sh and compose.
 
 ## How the pieces fit
 
