@@ -38,7 +38,11 @@ services:
       # MQKEYRPWD (that exact name; MQSSLKEYRPWD is silently ignored).
       # Alternative: MQSSLKEYR=/opt/config/ssl/key selects the CMS kdb, which
       # has a stash file and needs no password (MQKEYRPWD is then ignored).
+      # The tab-kdb scenario is
+      #   CCDT_URL=file:///opt/config/ssl/AMQCLCHL.TAB MQSSLKEYR=/opt/config/ssl/key
+      # (verify.sh runs both scenarios with its own containers, not this one).
       MQSSLKEYR: ${MQSSLKEYR:-/opt/config/ssl/mqmon.p12}
+      IBMMQ_CONNECTION_CCDTURL: ${CCDT_URL:-file:///opt/config/ccdt.json}
       MQKEYRPWD: ${KDB_PW:-passw0rd}
       IBMMQ_GLOBAL_LOGLEVEL: ${LOGLEVEL:-INFO}
     ports:

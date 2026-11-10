@@ -12,7 +12,9 @@
 #   qm/trust/0/tls.crt                     -> /etc/mqm/pki/trust/0    (CA that signed the client cert)
 #   client/mqmon.p12                       -> mounted into the exporter, MQSSLKEYR=.../mqmon.p12 + MQKEYRPWD
 #   client/key.kdb, key.sth, key.rdb       -> same identity as a CMS kdb, MQSSLKEYR=.../key (stash, no password)
-#   client-nocert/key.kdb, key.sth         -> CA only, used for the negative test
+#   client/AMQCLCHL.TAB                    -> binary CCDT, same CLNTCONN as config/ccdt.json (tab-kdb scenario)
+#   client-nocert/ca.p12                   -> CA only (PKCS#12), negative test of the ccdt-p12 scenario
+#   client-nocert/key.kdb, key.sth         -> CA only (CMS kdb), negative test of the tab-kdb scenario
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -54,6 +56,9 @@ docker run --rm --user "$UIDGID" -e KDB_PW="$KDB_PW" -v "$PKI/tmp:/work" -w /wor
   openssl pkcs12 -export -in mqmon.crt -inkey mqmon.key -certfile ca.crt \
     -name mqmon -out mqmon-legacy.p12 -passout "pass:$KDB_PW" \
     -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
+
+  # CA-only PKCS#12 (no personal certificate) for the negative test.
+  openssl pkcs12 -export -nokeys -in ca.crt -name e2eca -out ca.p12 -passout "pass:$KDB_PW"
 '
 
 cp "$PKI/tmp/qm1.key"  "$PKI/qm/keys/qm1/tls.key"
@@ -66,6 +71,7 @@ chmod 644 "$PKI"/qm/keys/qm1/* "$PKI"/qm/trust/0/*
 
 # ---- Client PKCS#12: nothing more to do, it is the key repository as-is -------
 cp "$PKI/tmp/mqmon.p12" "$PKI/client/mqmon.p12"
+cp "$PKI/tmp/ca.p12"    "$PKI/client-nocert/ca.p12"
 
 # ---- Client kdb via runmqakm (inside the MQ server image) ---------------------
 # Kept as the documented alternative: a CMS kdb has a stash file (.sth) so no
@@ -85,6 +91,21 @@ docker run --rm --user "$UIDGID" -e HOME=/tmp -e KDB_PW="$KDB_PW" \
   # verify.sh to prove the queue manager refuses a client without a certificate.
   runmqakm -keydb -create -db /out2/key.kdb -pw "$KDB_PW" -type cms -stash
   runmqakm -cert -add    -db /out2/key.kdb -stashed -label e2eca -file /work/ca.crt -format ascii -trust enable
+'
+
+# ---- Binary CCDT (AMQCLCHL.TAB) via runmqsc -n (inside the MQ server image) ----
+# Same CLNTCONN as config/ccdt.json. runmqsc -n writes to $MQCHLLIB/$MQCHLTAB but
+# still needs a writable /var/mqm (a symlink to /mnt/mqm/data), hence the tmpfs.
+# CERTLABL must be quoted, otherwise MQSC folds it to MQMON.
+docker run --rm --user "$UIDGID" --tmpfs /mnt/mqm:mode=1777 -e HOME=/tmp \
+  -e MQCHLLIB=/out -e MQCHLTAB=AMQCLCHL.TAB -v "$PKI/client:/out" \
+  --entrypoint sh "$MQ_IMAGE" -euc '
+  mkdir -p /mnt/mqm/data
+  /opt/mqm/bin/runmqsc -n <<EOF
+DEFINE CHANNEL(MON.SVRCONN) CHLTYPE(CLNTCONN) TRPTYPE(TCP) CONNAME('\''qm1(1414)'\'') +
+       QMNAME(QM1) SSLCIPH(ANY_TLS12_OR_HIGHER) CERTLABL('\''mqmon'\'') REPLACE
+DISPLAY CHANNEL(MON.SVRCONN) CONNAME QMNAME SSLCIPH CERTLABL
+EOF
 '
 
 chmod 644 "$PKI"/client/* "$PKI"/client-nocert/*
