@@ -9,20 +9,42 @@ gen-certs.sh                      docker compose                    verify.sh
    | openssl (alpine/openssl)          | qm1: icr.io/ibm-messaging/mq   | put msgs (amqsput)
    |   CA, QM1 cert, mqmon cert        |   PEM -> /etc/mqm/pki/...       | scrape :9157
    |   mqmon.p12 (key+cert+CA)         |   30-monitor.mqsc               | DIS CHSTATUS
-   | runmqakm (MQ server image)        | exporter: ghcr.io/anael-l/...   | kdb variant
-   |   key.kdb (+ CA-only kdb)         |   CCDT + MQSSLKEYR + MQKEYRPWD  | negative test
-   v                                   |                                 | otel image (stdout)
+   | runmqakm (MQ server image)        | exporter: ghcr.io/anael-l/...   | negative test
+   |   key.kdb (+ CA-only kdb/p12)     |   CCDT + MQSSLKEYR + MQKEYRPWD  | otel image (stdout)
+   | runmqsc -n (MQ server image)      |                                 | ... per scenario
+   |   AMQCLCHL.TAB                    |                                 |
+   v                                   |                                 |
   pki/                                 v                                 v
 ```
+
+## Scenarios
+
+| Scenario   | CCDT                                         | Key repository                                   |
+|------------|----------------------------------------------|--------------------------------------------------|
+| `ccdt-p12` | JSON, `config/ccdt.json`                     | PKCS#12 `mqmon.p12`, password in `MQKEYRPWD`     |
+| `tab-kdb`  | binary, `pki/client/AMQCLCHL.TAB`            | CMS `key.kdb` + `key.sth` stash, no password     |
+
+verify.sh runs each scenario against both images (mq_prometheus and mq_otel)
+and prints a PASS/FAIL line per scenario per collector at the end; it exits
+non-zero if any fails. Per scenario it checks: connection, `DIS CHSTATUS`
+(cipher, `SSLPEER` with `CN=mqmon`, `MCAUSER(mqmon)`), queue depth and other
+metrics, no authority failures, refusal of a CA-only keystore of the same
+format, and the OTel image's exported metrics. The `tab-kdb` runs do not mount
+`ccdt.json` at all, so the TAB is the only CCDT the client can find.
 
 ## Run
 
 ```bash
-./gen-certs.sh          # only docker is needed on the host
-docker compose up -d
-./verify.sh             # or ./verify.sh --fresh to do all three
+./verify.sh --fresh             # gen-certs.sh + qm1 + both scenarios
+SCENARIO=tab-kdb ./verify.sh    # one scenario (ccdt-p12 or tab-kdb), PKI already generated
 docker compose down -v
 ```
+
+verify.sh starts `qm1` itself and runs its own exporter containers (one per
+scenario), removing the compose `exporter` if it is up. To just run the stack
+by hand: `./gen-certs.sh && docker compose up -d` gives `ccdt-p12`;
+`CCDT_URL=file:///opt/config/ssl/AMQCLCHL.TAB MQSSLKEYR=/opt/config/ssl/key docker compose up -d`
+gives `tab-kdb`.
 
 `EXPORTER_IMAGE=...` overrides the Prometheus exporter image for verify.sh and
 compose; `OTEL_IMAGE=...` the OTel image run by verify.sh (`ghcr.io/anael-l/mq-metric-otel:master`);
@@ -45,27 +67,36 @@ against an MQ 9.4 queue manager.
   `config/ccdt.json` (`ANY_TLS12_OR_HIGHER`, `certificateLabel: mqmon`).
   No `user`/`password` is configured. The container runs as uid 1001 with no
   passwd entry, as OpenShift would run it.
-- **Key repository**: `gen-certs.sh` packages the same client identity two ways
-  and verify.sh checks both:
-  - `pki/client/mqmon.p12` (default). Plain OpenSSL 3 output, no MQ tooling.
+- **Binary CCDT**: `gen-certs.sh` writes `pki/client/AMQCLCHL.TAB` with
+  `runmqsc -n` in the MQ server image (`MQCHLLIB`/`MQCHLTAB` set, a tmpfs on
+  `/mnt/mqm` because `runmqsc -n` still wants a writable `/var/mqm`). It holds
+  the same CLNTCONN as `ccdt.json`. `CERTLABL('mqmon')` must be quoted or MQSC
+  folds it to `MQMON`. The collector reads it through `ccdtUrl`
+  (`file:///opt/config/ssl/AMQCLCHL.TAB`, set by verify.sh with
+  `IBMMQ_CONNECTION_CCDTURL`): the MQ 10 client accepts a binary TAB there.
+  `MQCHLLIB`/`MQCHLTAB` also work, but only if `ccdtUrl` is absent from the
+  YAML; an empty `IBMMQ_CONNECTION_CCDTURL` does not clear the YAML value.
+- **Key repository**: `gen-certs.sh` packages the same client identity two ways:
+  - `pki/client/mqmon.p12` (`ccdt-p12`). Plain OpenSSL 3 output, no MQ tooling.
     `MQSSLKEYR=/opt/config/ssl/mqmon.p12` and the password in `MQKEYRPWD`
     (exactly that name; `MQSSLKEYRPWD` is ignored). The p12 must contain the
     CA and its friendly name must equal `certificateLabel`. To keep the
     password out of the environment, put `SSLKeyRepositoryPassword` in an
     `mqclient.ini` SSL stanza (`MQCLNTCF=...`); `runmqicred` in the image can
     encrypt it.
-  - `pki/client/key.kdb` (+ `.sth`). CMS key database built with `runmqakm`;
-    the stash file means no password is needed. Select it with
-    `MQSSLKEYR=/opt/config/ssl/key docker compose up -d` (path without `.kdb`).
+  - `pki/client/key.kdb` (+ `.sth`) (`tab-kdb`). CMS key database built with
+    `runmqakm`; the stash file means no password is needed.
+    `MQSSLKEYR=/opt/config/ssl/key` (path without `.kdb`).
   - PEM files are **not** accepted as a key repository by the MQ 10 C client.
-- **OTel collector**: verify.sh also runs the `mq_otel` image once with
+- **OTel collector**: verify.sh also runs the `mq_otel` image once per scenario with
   `config/mq_otel.yaml` (same connection block, empty `otel.endpoint` so the
   stdout exporter is used, `MQIGO_UNITTEST_MAX_LOOPS=3` so it exits) and
   checks the JSON it prints for the same queue depth and channel status.
 - **Proof of TLS auth**: `DIS CHSTATUS(MON.SVRCONN)` shows the negotiated
   cipher, `SSLPEER(...CN=mqmon...)` and `MCAUSER(mqmon)`; the `$SYS/MQ`
   subscriptions are owned by `mqmon`; and a second run with a keystore that
-  holds only the CA (`pki/client-nocert`) is refused.
+  holds only the CA (`pki/client-nocert/ca.p12` or `key.kdb`, matching the
+  scenario) is refused.
 
 ## Notes
 
